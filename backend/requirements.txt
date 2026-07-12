@@ -1,0 +1,30 @@
+fastapi
+uvicorn
+python-multipart
+python-dotenv
+pydantic-settings
+pymupdf
+openpyxl
+pandas
+
+# LLM / Agent
+langchain
+langgraph
+langchain-groq
+langchain-core
+langchain-community
+
+# Graph DB
+neo4j
+
+# Vector DB
+langchain-chroma
+chromadb
+langchain-cohere
+cohere
+
+# Slack
+slack-sdk
+
+# Audio transcription
+groq

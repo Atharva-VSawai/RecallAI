@@ -1,8 +1,7 @@
 import logging
 import json
-from langchain_groq import ChatGroq
+from core.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from core.config import settings
 from tools.ingestion_tools import validate_content, extract_and_store
 
 logger = logging.getLogger(__name__)
@@ -10,11 +9,7 @@ logger = logging.getLogger(__name__)
 tools = [validate_content, extract_and_store]
 tools_map = {t.name: t for t in tools}
 
-llm = ChatGroq(
-    api_key=settings.groq_api_key,
-    model_name="llama-3.3-70b-versatile",
-    temperature=0,
-).bind_tools(tools)
+
 
 SYSTEM = """You are an ingestion agent responsible for building organizational memory.
 Given raw content:
@@ -24,8 +19,9 @@ Given raw content:
 Always use tools. Never answer directly."""
 
 
-def run_ingestion_agent(content: str, source: str) -> dict:
-    logger.info(f"[INGESTION AGENT] source='{source}' len={len(content)}")
+def run_ingestion_agent(content: str, source: str, provider: str = "groq") -> dict:
+    logger.info(f"[INGESTION AGENT] source='{source}' len={len(content)} | Provider: {provider}")
+    llm = get_llm(provider).bind_tools(tools)
     messages = [
         SystemMessage(content=SYSTEM),
         HumanMessage(content=f"Source: {source}\n\nContent:\n{content}"),
@@ -43,6 +39,7 @@ def run_ingestion_agent(content: str, source: str) -> dict:
             args = dict(tc["args"]) if tc["args"] else {}
             if tc["name"] == "extract_and_store":
                 args["source"] = source
+                args["provider"] = provider
             result = tools_map[tc["name"]].invoke(args)
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 

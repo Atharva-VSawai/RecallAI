@@ -1,102 +1,107 @@
-import fitz
-import json
 import logging
-from langchain_groq import ChatGroq
+from typing import List, Optional
+
+import fitz
 from langchain_core.prompts import ChatPromptTemplate
-from core.config import settings
+from pydantic import BaseModel, Field
+
+from core.llm import get_llm
+from ingestion.audio import transcribe_audio
 from ingestion.excel import extract_text_from_excel
 from ingestion.image import extract_text_from_image
-from ingestion.audio import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
-llm = ChatGroq(
-    api_key=settings.groq_api_key,
-    model_name="llama-3.3-70b-versatile",
-    temperature=0,
-)
+
+class DecisionItem(BaseModel):
+    decision: str = Field(description="what was decided")
+    reason: str = Field(description="why it was decided")
+    impact: str = Field(description="effect on the organization")
+    alternatives: List[str] = Field(default_factory=list)
+    people: List[str] = Field(default_factory=list)
+    timestamp: Optional[str] = Field(default=None)
+    topic: str = Field(description="high-level domain")
+
+
+class ExtractionResult(BaseModel):
+    items: List[DecisionItem]
+
 
 PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are an organizational memory extractor.
 Extract ALL decisions, reasoning, and key information from the content.
-Return a JSON array. Each item must have exactly these fields:
-- decision: what was decided
-- reason: why it was decided
-- impact: effect on the organization
-- alternatives: list of strings (alternatives considered)
-- people: list of strings (people involved)
-- timestamp: date if mentioned, else null
-- topic: high-level domain (e.g. hiring, product, budget, tech)
-
-Return ONLY a valid JSON array. No markdown, no explanation."""),
+Follow the JSON schema perfectly."""),
     ("human", "Content:\n{content}"),
 ])
 
-chain = PROMPT | llm
 
+def _structure_and_store(
+    raw_text: str,
+    source: str,
+    provider: str = "groq",
+    store_graph: bool = True,
+    store_vector: bool = True,
+) -> dict:
+    """Extract content and optionally write legacy projections.
 
-def _structure_and_store(raw_text: str, source: str) -> dict:
-    # Store raw text in ChromaDB first
-    from db.chroma import chroma_store
-    try:
+    Services use both persistence flags as False so PostgreSQL can commit the
+    authoritative transaction before projection writes occur.
+    """
+    if store_vector:
+        from db.chroma import chroma_store
         chroma_store(content=raw_text, source=source)
-        logger.info(f"[CHROMA] ✓ Stored raw text: {source}")
-    except Exception as e:
-        logger.error(f"[CHROMA] ✗ Failed: {e}")
 
-    response = chain.invoke({"content": raw_text})
-    raw = response.content.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
+    llm = get_llm(provider)
+    chain = PROMPT | llm.with_structured_output(ExtractionResult)
+    max_len = 1000 if provider == "ollama" else 100000
+    chunks, current_chunk = [], ""
+    for paragraph in raw_text.split("\n"):
+        if len(current_chunk) + len(paragraph) > max_len and current_chunk:
+            chunks.append(current_chunk.strip())
+            current_chunk = paragraph + "\n"
+        else:
+            current_chunk += paragraph + "\n"
+    if current_chunk:
+        chunks.append(current_chunk.strip())
 
-    items = json.loads(raw)
-    if not isinstance(items, list):
-        items = [items]
-    logger.info(f"[GROQ] Extracted {len(items)} items from '{source}'")
+    items = []
+    for index, chunk in enumerate(chunks):
+        if not chunk.strip():
+            continue
+        try:
+            response = chain.invoke({"content": chunk})
+            if response and response.items:
+                items.extend(item.model_dump() for item in response.items if item.decision.strip())
+        except Exception as exc:
+            logger.error("Extraction failed for chunk %s/%s: %s", index + 1, len(chunks), exc)
 
-    from db.neo import neo_store
-    for i, item in enumerate(items):
-        decision_id = neo_store(
-            subject=item.get("topic", "general"),
-            action=item.get("decision", ""),
-            reason=item.get("reason", ""),
-            source=source,
-            people=item.get("people") or [],
-            impact=item.get("impact", ""),
-            alternatives=item.get("alternatives") or [],
-            timestamp=str(item.get("timestamp") or ""),
-        )
-        item["decision_id"] = decision_id
-        logger.info(f"[NEO4J] ✓ {i+1}/{len(items)}: '{item.get('decision', '')[:60]}'")
-
-    return {"ingested": len(items), "items": items}
+    if store_graph:
+        from db.neo import neo_store
+        for item in items:
+            item["decision_id"] = neo_store(
+                subject=item.get("topic", "general"), action=item.get("decision", ""),
+                reason=item.get("reason", ""), source=source, people=item.get("people") or [],
+                impact=item.get("impact", ""), alternatives=item.get("alternatives") or [],
+                timestamp=str(item.get("timestamp") or ""),
+            )
+    return {"ingested": len(items), "items": items, "raw_text": raw_text}
 
 
-def run_ingestion(file_bytes: bytes, filename: str, source: str = "document") -> dict:
-    """Universal ingestion pipeline for PDF, Excel, Images, Audio/Video."""
-    file_ext = filename.lower().split('.')[-1]
-    
-    if file_ext in ['xlsx', 'xls']:
+def run_ingestion(file_bytes: bytes, filename: str, source: str = "document", provider: str = "groq", store_graph: bool = True, store_vector: bool = True) -> dict:
+    file_ext = filename.lower().rsplit(".", 1)[-1]
+    if file_ext in {"xlsx", "xls"}:
         raw_text = extract_text_from_excel(file_bytes, filename)
-        logger.info(f"[EXTRACT] Excel '{filename}' → {len(raw_text)} chars")
-    elif file_ext == 'pdf':
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
-        raw_text = "\n".join(page.get_text() for page in doc)
-        logger.info(f"[EXTRACT] PDF '{filename}' → {len(raw_text)} chars")
-    elif file_ext in ['png', 'jpg', 'jpeg', 'gif', 'webp']:
-        raw_text = extract_text_from_image(file_bytes, filename)
-        logger.info(f"[EXTRACT] Image '{filename}' → {len(raw_text)} chars")
-    elif file_ext in ['mp3', 'wav', 'm4a', 'mp4', 'mov', 'avi', 'mkv', 'flac', 'ogg', 'webm']:
+    elif file_ext == "pdf":
+        document = fitz.open(stream=file_bytes, filetype="pdf")
+        raw_text = "\n".join(page.get_text() for page in document)
+    elif file_ext in {"png", "jpg", "jpeg", "gif", "webp"}:
+        raw_text = extract_text_from_image(file_bytes, filename, provider=provider)
+    elif file_ext in {"mp3", "wav", "m4a", "mp4", "mov", "avi", "mkv", "flac", "ogg", "webm"}:
         raw_text = transcribe_audio(file_bytes, filename)
-        logger.info(f"[EXTRACT] Audio/Video '{filename}' → {len(raw_text)} chars")
     else:
-        raise ValueError(f"Unsupported file type: {file_ext}. Supported: PDF, Excel, Images, Audio/Video")
-    
-    return _structure_and_store(raw_text, source)
+        raise ValueError(f"Unsupported file type: {file_ext}")
+    return _structure_and_store(raw_text, source, provider, store_graph, store_vector)
 
 
-def run_ingestion_from_text(raw_text: str, source: str) -> dict:
-    logger.info(f"[EXTRACT] source='{source}' → {len(raw_text)} chars")
-    return _structure_and_store(raw_text, source)
+def run_ingestion_from_text(raw_text: str, source: str, provider: str = "groq", store_graph: bool = True, store_vector: bool = True) -> dict:
+    return _structure_and_store(raw_text, source, provider, store_graph, store_vector)

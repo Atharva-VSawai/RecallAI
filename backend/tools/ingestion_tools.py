@@ -1,14 +1,15 @@
 import json
 import logging
 from langchain.tools import tool
-from langchain_groq import ChatGroq
+from core.llm import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from core.config import settings
+from ingestion.pipeline import ExtractionResult
 from db.neo import neo_store
 
 logger = logging.getLogger(__name__)
 
-_llm = ChatGroq(api_key=settings.groq_api_key, model_name="llama-3.3-70b-versatile", temperature=0)
+
 
 _PROMPT = ChatPromptTemplate.from_messages([
     ("system", """Extract data from Excel rows. Each row = 1 record.
@@ -17,22 +18,15 @@ Financial data: Extract category, amount, date.
 Audit data: Extract finding, status, owner.
 Other: Extract key info from each row.
 
-Return JSON array:
-- decision: (required) row summary
-- topic: category
-- impact: amount/severity
-- people: names found
-- timestamp: date found
-
-Return ONLY JSON array, no markdown."""),
+Follow the JSON schema perfectly."""),
     ("human", "{content}"),
 ])
 
-_chain = _PROMPT | _llm
+
 
 
 @tool
-def extract_and_store(content: str, source: str) -> str:
+def extract_and_store(content: str, source: str, provider: str = "groq") -> str:
     """Extract decisions from raw text using LLM and store them into Neo4j graph memory."""
     # Always store raw text in Chroma first
     from db.chroma import chroma_store
@@ -44,16 +38,15 @@ def extract_and_store(content: str, source: str) -> str:
     
     # Try to extract and store decisions
     try:
-        response = _chain.invoke({"content": content})
-        raw = response.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-
-        items = json.loads(raw)
-        if not isinstance(items, list):
-            items = [items]
+        llm = get_llm(provider)
+        structured_llm = llm.with_structured_output(ExtractionResult)
+        chain = _PROMPT | structured_llm
+        
+        response = structured_llm.invoke(_PROMPT.format_messages(content=content))
+        
+        items = []
+        if response and response.items:
+            items = [item.model_dump() for item in response.items if item.decision and item.decision.strip()]
         
         logger.info(f"[INGEST TOOL] LLM extracted {len(items)} items")
 

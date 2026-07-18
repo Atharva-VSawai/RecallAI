@@ -1,7 +1,6 @@
 import logging
-from langchain_groq import ChatGroq
+from core.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
-from core.config import settings
 from tools.impact_tools import find_related_decisions, find_decisions_by_person
 from tools.chroma import search_raw_memory
 
@@ -10,12 +9,7 @@ logger = logging.getLogger(__name__)
 tools = [find_related_decisions, find_decisions_by_person, search_raw_memory]
 tools_map = {t.name: t for t in tools}
 
-llm_base = ChatGroq(
-    api_key=settings.groq_api_key,
-    model_name="llama-3.3-70b-versatile",
-    temperature=0,
-)
-llm = llm_base.bind_tools(tools)
+
 
 SYSTEM = """You are an impact analysis agent.
 You answer "what if" and "what breaks" questions about organizational decisions.
@@ -43,7 +37,7 @@ Be direct and concise. Focus on the specific impact being asked about.
 Always cite sources."""
 
 
-def _run_tools_directly(question: str, source_filter: str = None) -> tuple:
+def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list, list, list]:
     tools_used, source_trace, tool_results = [], [], []
     for tool_name, tool_fn in tools_map.items():
         key = "topic" if tool_name == "find_related_decisions" else ("person_name" if tool_name == "find_decisions_by_person" else "query")
@@ -57,8 +51,11 @@ def _run_tools_directly(question: str, source_filter: str = None) -> tuple:
     return tool_results, tools_used, source_trace
 
 
-def run_impact_agent(question: str, source_filter: str = None) -> dict:
-    logger.info(f"[IMPACT AGENT] Question: {question} | Filter: {source_filter}")
+def run_impact_agent(question: str, source_filter: str = None, provider: str = "groq") -> dict:
+    logger.info(f"[IMPACT AGENT] Question: {question} | Filter: {source_filter} | Provider: {provider}")
+
+    llm_base = get_llm(provider)
+    llm = llm_base.bind_tools(tools)
 
     messages = [SystemMessage(content=SYSTEM)]
     if source_filter:
@@ -70,6 +67,19 @@ def run_impact_agent(question: str, source_filter: str = None) -> dict:
     source_trace = []
 
     try:
+        if provider == "ollama":
+            logger.info("[IMPACT AGENT] Provider is ollama, using direct tool execution")
+            tool_results, tools_used, source_trace = _run_tools_directly(question, source_filter)
+            context = "\n\n".join(tool_results)
+            fallback_messages = [SystemMessage(content=SYSTEM)]
+            fallback_messages.append(HumanMessage(content=f"Context from knowledge base:\n{context}\n\nQuestion: {question}"))
+            response = llm_base.invoke(fallback_messages)
+            return {
+                "answer": response.content,
+                "reasoning": f"Tools used: {', '.join(tools_used)}",
+                "source_trace": source_trace,
+            }
+
         for _ in range(4):
             response = llm.invoke(messages)
             messages.append(response)

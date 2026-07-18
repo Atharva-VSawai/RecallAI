@@ -77,6 +77,9 @@ GROQ_API_KEY=your_groq_api_key
 NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io
 NEO4J_USERNAME=your_username
 NEO4J_PASSWORD=your_password
+SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
+SUPABASE_JWT_AUDIENCE=authenticated
+SUPABASE_JWT_ISSUER=https://your-project.supabase.co/auth/v1
 ```
 
 ### 4. Run

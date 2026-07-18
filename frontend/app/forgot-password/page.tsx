@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
-import { Mail, ArrowRight, Brain, ArrowLeft } from "lucide-react";
+import { Mail, ArrowRight, ArrowLeft, MailCheck, Sparkles } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 export default function ForgotPasswordPage() {
@@ -29,108 +29,213 @@ export default function ForgotPasswordPage() {
         setSuccess(true);
         setLoading(false);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to connect to authentication service");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to connect to authentication service";
+      setError(msg);
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6 py-20">
-      <motion.div
-        animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3], rotate: [0, 180, 360] }}
-        transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full pointer-events-none"
+    <div className="relative min-h-screen flex items-center justify-center px-6 py-24 overflow-hidden">
+      {/* Ambient orbs */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="orb orb-cyan w-[500px] h-[500px] -top-40 -right-32 animate-float-slow" />
+        <div className="orb orb-violet w-[400px] h-[400px] -bottom-40 -left-32 animate-float" style={{ animationDelay: "1s" }} />
+      </div>
+
+      {/* Grid overlay */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.03]"
         style={{
-          background: "radial-gradient(circle, #FFD4B060 0%, #FF9A5640 30%, transparent 70%)",
-          filter: "blur(80px)",
+          backgroundImage: `linear-gradient(var(--card-border-strong) 1px, transparent 1px), linear-gradient(90deg, var(--card-border-strong) 1px, transparent 1px)`,
+          backgroundSize: "60px 60px",
         }}
       />
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-        className="glass-card rounded-3xl p-10 border-2 border-[var(--card-border)] shadow-2xl max-w-md w-full relative z-10"
+        initial={{ opacity: 0, y: 32, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+        className="relative z-10 w-full max-w-md"
       >
-        <motion.div
-          whileHover={{ rotate: 360, scale: 1.2 }}
-          transition={{ duration: 0.6 }}
-          className="flex justify-center mb-6"
-        >
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-orange-100 to-amber-100 shadow-lg">
-            <Brain size={40} className="text-orange-600" />
-          </div>
-        </motion.div>
+        <div className="glass-strong rounded-3xl border border-card-border-strong shadow-2xl shadow-black/30 overflow-hidden">
+          {/* Top accent bar */}
+          <div className="h-1 w-full bg-gradient-to-r from-accent via-accent-2 to-accent-3 animate-gradient" />
 
-        <h1 className="text-3xl font-bold text-center text-gray-900 mb-2">Reset Password</h1>
-        <p className="text-center text-gray-600 mb-8">Enter your email to receive a reset link</p>
-
-        {success ? (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="space-y-4"
-          >
-            <div className="p-6 rounded-xl bg-green-50 border-2 border-green-200 text-center">
-              <p className="text-green-700 font-medium mb-2">Check your email!</p>
-              <p className="text-green-600 text-sm">We've sent a password reset link to {email}</p>
-            </div>
-            <Link
-              href="/login"
-              className="flex items-center justify-center gap-2 text-orange-600 hover:text-orange-700 font-medium text-sm"
+          <div className="p-10">
+            {/* Logo */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.15, duration: 0.5, type: "spring", stiffness: 200 }}
+              className="flex justify-center mb-8"
             >
-              <ArrowLeft size={16} />
-              Back to login
-            </Link>
-          </motion.div>
-        ) : (
-          <form onSubmit={handleReset} className="space-y-5">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-              <div className="relative">
-                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 rounded-xl border-2 border-orange-200 focus:border-orange-400 focus:outline-none transition-all glow-input bg-white/90"
-                  placeholder="you@example.com"
-                  required
-                />
-              </div>
-            </div>
-
-            {error && (
               <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-3 rounded-xl bg-red-50 border-2 border-red-200 text-red-700 text-sm"
+                whileHover={{ scale: 1.08, rotate: -4 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                className="relative"
               >
-                {error}
+                <img
+                  src="/logo2.png"
+                  alt="Recall.AI"
+                  className="h-16 w-auto object-contain relative z-10 drop-shadow-[0_0_24px_rgba(6,182,212,0.45)]"
+                />
+                <div className="absolute inset-0 bg-gradient-to-r from-accent/30 via-accent-2/30 to-accent-3/30 blur-2xl rounded-full" />
               </motion.div>
-            )}
+            </motion.div>
 
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="submit"
-              disabled={loading}
-              className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 via-amber-500 to-orange-400 text-white font-bold text-base sunrise-glow flex items-center justify-center gap-2 disabled:opacity-50"
+            {/* Heading */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.22, duration: 0.5 }}
+              className="text-center mb-8"
             >
-              {loading ? "Sending..." : "Send Reset Link"}
-              {!loading && <ArrowRight size={18} />}
-            </motion.button>
+              <div className="inline-flex items-center gap-2 glass rounded-full px-4 py-1.5 text-xs font-semibold text-foreground-muted border border-card-border mb-4">
+                <Sparkles size={12} className="text-accent" />
+                Account Recovery
+              </div>
+              <h1 className="text-3xl font-black font-display text-foreground mb-2">
+                Reset Password
+              </h1>
+              <p className="text-foreground-muted text-sm">
+                Enter your email to receive a reset link
+              </p>
+            </motion.div>
 
-            <Link
-              href="/login"
-              className="flex items-center justify-center gap-2 text-orange-600 hover:text-orange-700 font-medium text-sm"
-            >
-              <ArrowLeft size={16} />
-              Back to login
-            </Link>
-          </form>
-        )}
+            {/* Content */}
+            <AnimatePresence mode="wait">
+              {success ? (
+                <motion.div
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.9, y: 12 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ type: "spring", stiffness: 200 }}
+                  className="flex flex-col items-center gap-5 py-6"
+                >
+                  <motion.div
+                    initial={{ scale: 0, rotate: -45 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    transition={{ delay: 0.1, type: "spring", stiffness: 300, damping: 20 }}
+                    className="p-5 rounded-2xl bg-gradient-to-br from-accent to-accent-2 shadow-lg shadow-accent/25"
+                  >
+                    <MailCheck size={36} className="text-white" />
+                  </motion.div>
+
+                  <div className="text-center">
+                    <p className="text-foreground font-bold text-lg mb-1">Check your inbox!</p>
+                    <p className="text-foreground-muted text-sm">
+                      We&apos;ve sent a reset link to{" "}
+                      <span className="text-accent font-semibold">{email}</span>
+                    </p>
+                  </div>
+
+                  <div className="glass rounded-xl border border-card-border px-5 py-4 text-xs text-foreground-muted text-center">
+                    Didn&apos;t receive it? Check your spam folder or{" "}
+                    <button
+                      onClick={() => setSuccess(false)}
+                      className="text-accent hover:text-foreground transition-colors font-medium"
+                    >
+                      try again
+                    </button>
+                    .
+                  </div>
+
+                  <Link
+                    href="/login"
+                    className="flex items-center gap-2 text-sm text-foreground-muted hover:text-foreground transition-colors duration-300 group"
+                  >
+                    <ArrowLeft size={14} className="group-hover:-translate-x-1 transition-transform duration-300" />
+                    Back to sign in
+                  </Link>
+                </motion.div>
+              ) : (
+                <motion.form
+                  key="form"
+                  onSubmit={handleReset}
+                  className="space-y-5"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3, duration: 0.5 }}
+                >
+                  {/* Email */}
+                  <div>
+                    <label
+                      htmlFor="reset-email"
+                      className="block text-sm font-medium text-foreground-muted mb-2"
+                    >
+                      Email address
+                    </label>
+                    <div className="relative">
+                      <Mail
+                        size={16}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 text-foreground-dim pointer-events-none z-10"
+                      />
+                      <input
+                        id="reset-email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="you@company.com"
+                        className="glow-input w-full pl-11 pr-4 py-3.5 rounded-xl text-sm"
+                        required
+                        autoComplete="email"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Error */}
+                  <AnimatePresence>
+                    {error && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -8, height: 0 }}
+                        animate={{ opacity: 1, y: 0, height: "auto" }}
+                        exit={{ opacity: 0, y: -8, height: 0 }}
+                        className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger"
+                      >
+                        {error}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Submit */}
+                  <motion.button
+                    type="submit"
+                    disabled={loading}
+                    whileHover={{ scale: loading ? 1 : 1.02, y: loading ? 0 : -1 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="btn-primary w-full py-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {loading ? (
+                      <>
+                        <motion.span
+                          animate={{ rotate: 360 }}
+                          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                          className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full"
+                        />
+                        <span>Sending…</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Send Reset Link</span>
+                        <ArrowRight size={16} />
+                      </>
+                    )}
+                  </motion.button>
+
+                  <Link
+                    href="/login"
+                    className="flex items-center justify-center gap-2 text-sm text-foreground-muted hover:text-foreground transition-colors duration-300 group"
+                  >
+                    <ArrowLeft size={14} className="group-hover:-translate-x-1 transition-transform duration-300" />
+                    Back to sign in
+                  </Link>
+                </motion.form>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </motion.div>
     </div>
   );

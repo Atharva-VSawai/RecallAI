@@ -1,257 +1,262 @@
-# 🧠 Organizational Memory & Reasoning Engine
+# Recall.AI
 
-> Query your company's institutional knowledge. Understand why decisions were made, who was involved, and what breaks if things change.
+Recall.AI is an organizational memory and reasoning platform that converts company documents, Slack conversations, spreadsheets, images, audio, and video into searchable institutional knowledge.
 
-Built at **Sunhacks** — a full-stack agentic AI system that ingests knowledge from Slack channels and PDF documents, stores it in a graph database, and lets you reason over it using natural language.
+The system combines structured decision storage in Neo4j, semantic raw-content retrieval in ChromaDB, LLM-assisted extraction, specialized reasoning agents, Supabase authentication, and a Next.js user interface.
 
----
+This repository is currently a working prototype and academic major-project foundation. The university hardening roadmap is documented in DEVELOPMENT_ROADMAP.md.
 
-## ✨ What It Does
+## Project overview
 
-- **Ingest** — Upload PDFs or pull Slack channel history. An AI agent extracts structured decisions, people, reasons, and alternatives automatically.
-- **Store** — Decisions are stored as a knowledge graph in Neo4j and as semantic vectors in ChromaDB.
-- **Smart Upload** — Automatic duplicate detection prevents re-processing. Select from existing files or upload new ones.
-- **Query** — Ask anything in plain English. A router agent decides whether to run a **Query Agent** (history, decisions, people) or an **Impact Agent** (what-if, what breaks, risk analysis).
-- **Reason** — Powered by `llama-3.3-70b-versatile` via Groq. Every answer includes sources, reasoning, and tool traces.
+Organizations often lose the reasoning behind decisions because knowledge is distributed across chats, documents, spreadsheets, and meetings. Recall.AI addresses this by:
 
----
+1. Ingesting heterogeneous organizational sources.
+2. Extracting decisions, reasons, people, alternatives, topics, timestamps, and impacts.
+3. Storing structured knowledge as a graph.
+4. Storing raw text as embedding-searchable memory.
+5. Routing natural-language questions to specialized agents.
+6. Returning answers with source traces.
 
-## 🏗️ Architecture
+## Features
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Next.js Frontend                    │
-│         Query · Upload PDF · Slack Ingest                │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTP
-┌────────────────────────▼────────────────────────────────┐
-│                    FastAPI Backend                        │
-│                                                          │
-│   POST /query          POST /ingest/upload               │
-│   POST /ingest/slack   GET  /health                      │
-└──────┬──────────────────────────┬───────────────────────┘
-       │                          │
-┌──────▼──────┐          ┌────────▼────────┐
-│   Router    │          │ Ingestion Agent  │
-│   Agent     │          │                 │
-│  QUERY  ──► │ Neo4j    │ validate_content │
-│  IMPACT ──► │ ChromaDB │ extract_and_store│
-└─────────────┘          └─────────────────┘
-       │
-┌──────▼──────────────────────────┐
-│         Neo4j AuraDB            │  ← structured decisions graph
-│         ChromaDB                │  ← semantic vector search
-└─────────────────────────────────┘
-```
+### Current features
 
----
+- PDF ingestion
+- Excel ingestion
+- Image OCR ingestion
+- Audio/video transcription
+- Slack channel ingestion
+- SHA-256 duplicate file detection
+- Query Agent
+- Impact Agent
+- Source-specific query filtering
+- Neo4j graph visualization
+- ChromaDB semantic search
+- Activity timeline
+- Supabase login, signup, and password recovery
+- Dark/light theme
+- Responsive interface
 
-## 🛠️ Tech Stack
+### Academic-hardening features to implement
 
-| Layer | Technology |
+- Relational database schema with parent/child tables and foreign keys
+- Database constraints and indexes
+- Stored procedures and database functions where required
+- Backend JWT verification
+- Role/ownership authorization
+- Three- or four-layer backend architecture
+- Structured logging
+- Global exception handling
+- Custom exception hierarchy
+- Unit, integration, API, and acceptance tests
+- Complete academic diagrams and research documentation
+
+## Architecture
+
+Current flow:
+
+Frontend → FastAPI REST API → Agents and ingestion pipelines → Neo4j and ChromaDB
+
+Target academic flow:
+
+Presentation Layer → API/Application Layer → Business/Domain Layer → Data Access Layer → Databases and external providers
+
+See ARCHITECTURE.md.
+
+## Technology stack
+
+| Area | Technology |
 |---|---|
-| Frontend | Next.js 16, Tailwind CSS, Framer Motion, Lucide React |
-| Backend | FastAPI, LangGraph, LangChain |
-| LLM | Groq — `llama-3.3-70b-versatile` |
-| Graph DB | Neo4j AuraDB |
-| Vector DB | ChromaDB |
-| Slack | Slack SDK (`slack_sdk`) |
-| PDF Parsing | PyMuPDF (`fitz`) |
+| Frontend | Next.js, React, TypeScript |
+| Styling | Tailwind CSS, Framer Motion, GSAP |
+| UI | Radix UI, Lucide React |
+| Backend | Python, FastAPI, Uvicorn |
+| Agent framework | LangChain, LangGraph |
+| Cloud LLM | Groq |
+| Local LLM option | Ollama |
+| Graph storage | Neo4j AuraDB |
+| Vector storage | ChromaDB Cloud |
+| Embeddings | Cohere |
+| Authentication | Supabase Auth |
+| PDF processing | PyMuPDF |
+| Spreadsheet processing | OpenPyXL |
+| Messaging source | Slack SDK |
 
----
+## Folder structure
 
-## 📁 Project Structure
-
-```
-sunhacks/
+~~~text
+recallAi/
 ├── backend/
+│   ├── main.py
+│   ├── agent.py
+│   ├── activity_store.py
+│   ├── core/
 │   ├── agents/
-│   │   ├── router.py           → classifies QUERY vs IMPACT
-│   │   ├── query_agent.py      → answers history/decision questions
-│   │   ├── impact_agent.py     → answers what-if/risk questions
-│   │   └── ingestion_agent.py  → extracts and stores decisions
 │   ├── ingestion/
-│   │   ├── pipeline.py         → PDF → Groq → Neo4j
-│   │   └── slack.py            → Slack SDK → messages → text
-│   ├── tools/
-│   │   ├── neo.py              → search_decisions tool
-│   │   ├── chroma.py           → search_raw_memory tool
-│   │   └── impact_tools.py     → find_related_decisions tool
 │   ├── db/
-│   │   ├── neo.py              → Neo4j driver + store/search
-│   │   └── chroma.py           → ChromaDB store/search
-│   ├── core/config.py          → env vars via pydantic-settings
-│   ├── main.py                 → FastAPI routes
+│   ├── tools/
+│   ├── services/
 │   └── requirements.txt
-│
-└── frontend/
-    ├── app/
-    │   ├── page.tsx            → Hero + feature cards
-    │   ├── query/page.tsx      → Query · Upload PDF · Slack tabs
-    │   └── activity/page.tsx   → Animated event timeline
-    ├── components/
-    │   ├── Navbar.tsx          → Nav + live API health indicator
-    │   ├── AgentBadge.tsx      → QUERY / IMPACT badge
-    │   └── SourceCard.tsx      → Source trace card
-    └── lib/api.ts              → All backend API calls
-```
+├── frontend/
+│   ├── app/
+│   ├── components/
+│   ├── contexts/
+│   ├── lib/
+│   └── public/
+├── README.md
+├── PROJECT_STRUCTURE.md
+├── UNIVERSITY_EVALUATION.md
+├── DEVELOPMENT_ROADMAP.md
+├── ARCHITECTURE.md
+├── DATABASE_DESIGN.md
+├── SECURITY.md
+├── TESTING.md
+├── DEPLOYMENT.md
+├── WEEKLY_LOGBOOK.md
+└── FINAL_SUBMISSION_CHECKLIST.md
+~~~
 
----
-
-## 🚀 Quick Start
+## Installation
 
 ### Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- Neo4j AuraDB instance
+- Python 3.10 or newer
+- Node.js 18 or newer
+- npm
+- Neo4j instance
+- ChromaDB Cloud account
 - Groq API key
-- ChromaDB (local or cloud)
-- Slack Bot Token *(for Slack ingestion)*
+- Cohere API key
+- Slack bot token for Slack ingestion
+- Supabase project
 
----
+### Backend
 
-### 1. Clone
-
-```bash
-git clone https://github.com/your-username/sunhacks.git
-cd sunhacks
-```
-
-### 2. Backend
-
-```bash
+~~~text
 cd backend
 python -m venv venv
+~~~
 
-# Windows
+Windows:
+
+~~~text
 venv\Scripts\activate
+~~~
 
-# macOS / Linux
+macOS/Linux:
+
+~~~text
 source venv/bin/activate
+~~~
 
+Install:
+
+~~~text
 pip install -r requirements.txt
-cp .env.example .env
-```
+~~~
 
-Fill in `backend/.env`:
+Create backend/.env:
 
-```env
-GROQ_API_KEY=your_groq_api_key
-
-NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io
-NEO4J_USERNAME=your_username
-NEO4J_PASSWORD=your_password
-
-SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
-
-CHROMA_TENANT=your_chroma_tenant_id
-CHROMA_API_KEY=your_chroma_api_key
+~~~text
+GROQ_API_KEY=
+NEO4J_URI=
+NEO4J_USERNAME=
+NEO4J_PASSWORD=
+SLACK_BOT_TOKEN=
+COHERE_API_KEY=
+CHROMA_API_KEY=
+CHROMA_TENANT=
 CHROMA_DATABASE=notes
-```
+OLLAMA_MODEL=llama3.1
+~~~
 
-```bash
-uvicorn main:app --reload
-# API running at http://localhost:8000
-# Docs at     http://localhost:8000/docs
-```
+### Frontend
 
-### 3. Frontend
-
-```bash
+~~~text
 cd frontend
 npm install
-# .env.local is already configured — no changes needed for local dev
+~~~
+
+Create frontend/.env.local:
+
+~~~text
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_API_URL=http://localhost:8000
+~~~
+
+## Running locally
+
+Backend:
+
+~~~text
+cd backend
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+~~~
+
+Frontend:
+
+~~~text
+cd frontend
 npm run dev
-# App running at http://localhost:3000
-```
+~~~
 
----
+URLs:
 
-## 🔌 API Reference
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+- Swagger documentation: http://localhost:8000/docs
 
-| Method | Endpoint | Body | Description |
-|---|---|---|---|
-| `GET` | `/health` | — | Health check |
-| `POST` | `/query` | `{ question, source_filter? }` | Query the knowledge base |
-| `POST` | `/ingest/upload` | `multipart/form-data` file | Ingest a file (with duplicate detection) |
-| `POST` | `/ingest/slack` | `{ channel_id, limit }` | Ingest a Slack channel |
-| `GET` | `/files/list` | — | List all uploaded files |
-| `GET` | `/files/check/{source}` | — | Check if file exists by source |
+## API summary
 
-### Query Response Shape
-
-```json
-{
-  "question": "Why did we switch to Postgres?",
-  "agent_used": "QUERY",
-  "answer": "The team switched to Postgres in Q3 2023 because...",
-  "reasoning": "Tools used: search_decisions, search_raw_memory",
-  "source_trace": [
-    {
-      "tool": "search_decisions",
-      "args": { "query": "Postgres migration" },
-      "result_preview": "Decision: Migrate from MySQL..."
-    }
-  ],
-  "timestamp": "2024-01-15T10:30:00Z"
-}
-```
-
----
-
-## 🤖 Agent Routing
-
-Every query is automatically classified before being answered:
-
-```
-User question
-     │
-     ▼
-  Router Agent (llama-3.3-70b)
-     │
-     ├── QUERY  → "Why did we...?" / "Who decided...?" / "What was decided?"
-     │            Uses: search_decisions (Neo4j) + search_raw_memory (ChromaDB)
-     │
-     └── IMPACT → "What breaks if...?" / "What would happen if...?" / "Risk of..."
-                  Uses: find_related_decisions + find_decisions_by_person + search_raw_memory
-```
-
----
-
-## 📸 Pages
-
-| Page | Route | Description |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| Home | `/` | Hero section, feature cards, file selection dialog |
-| Knowledge Engine | `/query` | Query · Upload PDF · Slack ingest tabs |
-| Activity | `/activity` | Animated timeline of recent events |
+| GET | /health | Health check |
+| POST | /query | Query organizational memory |
+| POST | /ingest/upload | Upload supported files |
+| POST | /ingest/audio | Transcribe and ingest audio/video |
+| POST | /ingest/image | OCR and ingest images |
+| POST | /ingest/slack | Ingest Slack history |
+| GET | /files/list | List files |
+| GET | /files/check/{source} | Check source metadata |
+| DELETE | /files/{source} | Delete source data |
+| GET | /activity | Retrieve activity |
+| GET | /graph/data | Retrieve graph data |
 
----
+## Deployment
 
-## 🔑 Environment Variables
+A typical deployment uses a Next.js host, a Python API host, Neo4j AuraDB, ChromaDB Cloud, and Supabase Auth. See DEPLOYMENT.md.
 
-### Backend — `backend/.env`
+## Screenshots placeholder
 
-| Variable | Required | Description |
-|---|---|---|
-| `GROQ_API_KEY` | ✅ | Groq API key for LLM |
-| `NEO4J_URI` | ✅ | Neo4j AuraDB connection URI |
-| `NEO4J_USERNAME` | ✅ | Neo4j username |
-| `NEO4J_PASSWORD` | ✅ | Neo4j password |
-| `SLACK_BOT_TOKEN` | Slack only | Bot token for Slack ingestion |
-| `CHROMA_TENANT` | ✅ | ChromaDB tenant ID |
-| `CHROMA_API_KEY` | ✅ | ChromaDB API key |
-| `CHROMA_DATABASE` | ✅ | ChromaDB database name |
+Add screenshots before final submission:
 
-### Frontend — `frontend/.env.local`
+- [ ] Home page
+- [ ] Login page
+- [ ] Query page
+- [ ] Ingestion workflow
+- [ ] Activity page
+- [ ] Graph page
+- [ ] API documentation
+- [ ] Database evidence
 
-| Variable | Default | Description |
-|---|---|---|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend API base URL |
+## Future scope
 
----
+- Relational academic reporting database
+- Multi-tenant organizations
+- Role-based access control
+- Background ingestion jobs
+- More connectors
+- Decision conflict detection
+- Decision lifecycle workflows
+- Evaluation datasets
+- Multilingual OCR and transcription
 
-## 📄 License
+## Contributors
 
-MIT
+Add student names, roll numbers, supervisor, department, and institution before submission.
+
+## License
+
+Confirm the final license with the supervisor before submission.
+

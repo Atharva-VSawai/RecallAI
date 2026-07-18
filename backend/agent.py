@@ -1,27 +1,30 @@
+"""Legacy standalone agent path.
+
+Phase 1 freeze marker: current API routes use agents.router instead. Do not
+extend this module for new features; review or remove it during Phase 2 after
+manual compatibility verification.
+"""
+
 import logging
 import json
-from langchain_groq import ChatGroq
+from core.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from core.config import settings
 from tools.neo import search_decisions
 
 logger = logging.getLogger(__name__)
 
 tools = [search_decisions]
 
-llm = ChatGroq(
-    api_key=settings.groq_api_key,
-    model_name="llama-3.3-70b-versatile",
-    temperature=0,
-).bind_tools(tools)
+
 
 SYSTEM = """You are an organizational memory assistant.
 Use the search_decisions tool to find relevant decisions before answering.
 In your final answer always include: what was decided, why, who was involved, alternatives considered, and impact."""
 
 
-def run_agent(question: str) -> dict:
-    logger.info(f"[AGENT] Question: {question}")
+def run_agent(question: str, provider: str = "groq") -> dict:
+    logger.info(f"[AGENT] Question: {question} | Provider: {provider}")
+    llm = get_llm(provider).bind_tools(tools)
 
     messages = [SystemMessage(content=SYSTEM), HumanMessage(content=question)]
     tools_used = []

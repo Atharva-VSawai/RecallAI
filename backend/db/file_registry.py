@@ -116,3 +116,33 @@ def get_file_by_source(source: str) -> dict | None:
         )
         record = result.single()
         return record.data() if record else None
+
+def delete_file_by_source(source: str) -> dict:
+    """Delete a file and all its associated decisions from Neo4j."""
+    with _driver.session() as session:
+        # First delete all Decision nodes associated with this source
+        decision_result = session.run(
+            """
+            MATCH (d:Decision {source: $source})
+            DETACH DELETE d
+            RETURN count(d) as deleted_decisions
+            """,
+            source=source
+        )
+        deleted_decisions = decision_result.single()["deleted_decisions"]
+
+        # Then delete the File node itself
+        file_result = session.run(
+            """
+            MATCH (f:File {source: $source})
+            DETACH DELETE f
+            RETURN count(f) as deleted_files
+            """,
+            source=source
+        )
+        deleted_files = file_result.single()["deleted_files"]
+
+        return {
+            "deleted_decisions": deleted_decisions,
+            "deleted_files": deleted_files
+        }

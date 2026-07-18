@@ -1,7 +1,6 @@
 import logging
-from langchain_groq import ChatGroq
+from core.llm import get_llm
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, AIMessage
-from core.config import settings
 from tools.neo import search_decisions
 from tools.chroma import search_raw_memory
 
@@ -10,12 +9,7 @@ logger = logging.getLogger(__name__)
 tools = [search_decisions, search_raw_memory]
 tools_map = {t.name: t for t in tools}
 
-llm_base = ChatGroq(
-    api_key=settings.groq_api_key,
-    model_name="llama-3.3-70b-versatile",
-    temperature=0,
-)
-llm = llm_base.bind_tools(tools)
+
 
 SYSTEM = """You are an organizational memory assistant.
 Use search_decisions to find structured decisions from Neo4j.
@@ -47,7 +41,7 @@ Example bad answer: [returning entire transcript or making up information]
 """
 
 
-def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list, list]:
+def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list, list, list]:
     """Fallback: run both tools directly with the question as query."""
     tools_used = []
     source_trace = []
@@ -65,8 +59,11 @@ def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list,
     return tool_results, tools_used, source_trace
 
 
-def run_query_agent(question: str, source_filter: str = None) -> dict:
-    logger.info(f"[QUERY AGENT] Question: {question} | Filter: {source_filter}")
+def run_query_agent(question: str, source_filter: str = None, provider: str = "groq") -> dict:
+    logger.info(f"[QUERY AGENT] Question: {question} | Filter: {source_filter} | Provider: {provider}")
+
+    llm_base = get_llm(provider)
+    llm = llm_base.bind_tools(tools)
 
     messages = [SystemMessage(content=SYSTEM)]
     if source_filter:
@@ -78,6 +75,19 @@ def run_query_agent(question: str, source_filter: str = None) -> dict:
     source_trace = []
 
     try:
+        if provider == "ollama":
+            logger.info("[QUERY AGENT] Provider is ollama, using direct tool execution")
+            tool_results, tools_used, source_trace = _run_tools_directly(question, source_filter)
+            context = "\n\n".join(tool_results)
+            fallback_messages = [SystemMessage(content=SYSTEM)]
+            fallback_messages.append(HumanMessage(content=f"Context from knowledge base:\n{context}\n\nQuestion: {question}"))
+            response = llm_base.invoke(fallback_messages)
+            return {
+                "answer": response.content,
+                "reasoning": f"Tools used: {', '.join(tools_used)}",
+                "source_trace": source_trace,
+            }
+
         for _ in range(3):
             response = llm.invoke(messages)
             messages.append(response)

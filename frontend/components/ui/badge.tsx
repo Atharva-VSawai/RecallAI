@@ -7,8 +7,8 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "border-blue-400 bg-gradient-to-r from-blue-100 to-cyan-100 text-blue-700",
-        secondary: "border-cyan-400 bg-gradient-to-r from-cyan-100 to-blue-100 text-cyan-700",
+        default: "border-[var(--warm-orange)] bg-gradient-to-r from-[var(--warm-orange)]/20 to-[var(--warm-orange-light)]/20 text-[var(--warm-orange)]",
+        secondary: "border-[var(--warm-orange-light)] bg-gradient-to-r from-[var(--warm-orange-light)]/20 to-[var(--warm-orange)]/20 text-[var(--warm-orange)]",
         success: "border-green-400 bg-gradient-to-r from-green-100 to-emerald-100 text-green-700",
         outline: "border-gray-300 text-gray-700",
       },

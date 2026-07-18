@@ -3,9 +3,9 @@ uvicorn
 python-multipart
 python-dotenv
 pydantic-settings
+PyJWT[crypto]
 pymupdf
 openpyxl
-pandas
 
 # LLM / Agent
 langchain
@@ -13,13 +13,14 @@ langgraph
 langchain-groq
 langchain-core
 langchain-community
+langchain-ollama
 
 # Graph DB
 neo4j
 
 # Vector DB
 langchain-chroma
-chromadb
+chromadb-client
 langchain-cohere
 cohere
 
@@ -28,3 +29,5 @@ slack-sdk
 
 # Audio transcription
 groq
+pytest
+httpx

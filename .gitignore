@@ -25,11 +25,6 @@ backend/dist/
 backend/build/
 
 # Python site-packages and virtual environments
-site-packages/
-Lib/
-Scripts/
-pyvenv.cfg
-pip-selfcheck.json
 *.pyc
 *.pyo
 *.pyd

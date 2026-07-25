@@ -7,10 +7,11 @@ from db.chroma import chroma_search
 class SearchRawMemoryInput(BaseModel):
     query: str
     source_filter: Optional[str] = None
+    project_id: Optional[str] = None
 
 
-def _search_raw_memory(query: str, source_filter: Optional[str] = None) -> str:
-    docs = chroma_search(query, k=3, source_filter=source_filter)
+def _search_raw_memory(query: str, source_filter: Optional[str] = None, project_id: Optional[str] = None) -> str:
+    docs = chroma_search(query, k=3, source_filter=source_filter, project_id=project_id)
     if not docs:
         return "No relevant content found in raw memory."
     results = []

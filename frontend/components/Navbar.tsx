@@ -20,12 +20,25 @@ import {
   Settings,
   Copy,
   Check,
+  FolderKanban,
+  Plus,
+  Loader2,
+  ChevronsUpDown,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
-import { checkHealth } from "@/lib/api";
+import { checkHealth, createProject } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 const links = [
@@ -328,11 +341,17 @@ function UserAvatarMenu({
 export default function Navbar() {
   const path = usePathname();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, projects, activeProject, setActiveProjectId, refreshProjects } = useAuth();
   const [healthy, setHealthy] = useState<boolean | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [llmProvider, setLlmProvider] = useState<"groq" | "ollama">("groq");
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectName, setProjectName] = useState("");
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("llm_provider") as "groq" | "ollama";
@@ -361,9 +380,53 @@ export default function Navbar() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
+  useEffect(() => {
+    const closeProjectMenu = (event: MouseEvent) => {
+      if (projectMenuRef.current && !projectMenuRef.current.contains(event.target as Node)) {
+        setProjectMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", closeProjectMenu);
+    return () => document.removeEventListener("mousedown", closeProjectMenu);
+  }, []);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push("/login");
+  };
+
+  const openCreateProjectDialog = () => {
+    setProjectName("");
+    setProjectError(null);
+    setProjectDialogOpen(true);
+  };
+
+  const handleCreateProject = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = projectName.trim();
+    if (name.length < 2) {
+      setProjectError("Project name must be at least 2 characters.");
+      return;
+    }
+    if (name.length > 120) {
+      setProjectError("Project name must be 120 characters or fewer.");
+      return;
+    }
+    setCreatingProject(true);
+    setProjectError(null);
+    try {
+      const project = await createProject(name);
+      localStorage.setItem("recallai_active_project_id", project.id);
+      await refreshProjects();
+      setProjectDialogOpen(false);
+      setProjectName("");
+      window.dispatchEvent(new Event("recallai:project-changed"));
+      window.dispatchEvent(new Event("recallai:files-changed"));
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "Project could not be created.");
+    } finally {
+      setCreatingProject(false);
+    }
   };
 
   const statusColor =
@@ -372,6 +435,7 @@ export default function Navbar() {
     healthy === null ? "Checking..." : healthy ? "API Online" : "API Offline";
 
   const { initials, gradient } = getAvatarProps(user?.email);
+  const activeRole = activeProject?.role ?? "VIEWER";
 
   return (
     <motion.header
@@ -427,6 +491,87 @@ export default function Navbar() {
 
             {/* Right Section */}
             <div className="hidden md:flex items-center gap-3">
+              {user && (
+                <div ref={projectMenuRef} className="relative">
+                  <button
+                    onClick={() => setProjectMenuOpen((open) => !open)}
+                    className="flex min-w-64 items-center gap-3 rounded-xl border border-card-border-strong bg-card/70 px-3 py-2 text-left transition-colors hover:bg-card-hover"
+                    title="Switch active project"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                      <FolderKanban size={16} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[10px] font-bold uppercase tracking-widest text-foreground-dim">
+                        Active workspace
+                      </span>
+                      <span className="block truncate text-sm font-semibold text-foreground">
+                        {activeProject?.name ?? "Select project"}
+                      </span>
+                    </span>
+                    <span className="rounded-md border border-card-border px-2 py-1 text-[10px] font-bold text-foreground-muted">
+                      {activeRole}
+                    </span>
+                    <ChevronsUpDown size={14} className="text-foreground-dim" />
+                  </button>
+
+                  <AnimatePresence>
+                    {projectMenuOpen && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.98 }}
+                        transition={{ duration: 0.18 }}
+                        className="absolute left-0 top-[calc(100%+8px)] z-50 w-80 overflow-hidden rounded-xl border border-card-border-strong bg-background-secondary shadow-2xl shadow-black/30"
+                      >
+                        <div className="border-b border-card-border px-4 py-3">
+                          <p className="text-xs font-semibold text-foreground">Project workspaces</p>
+                          <p className="text-[11px] text-foreground-dim">
+                            Knowledge, files, graph, and activity stay isolated per project.
+                          </p>
+                        </div>
+                        <div className="max-h-72 overflow-y-auto p-2">
+                          {projects.map((project) => {
+                            const selected = project.id === activeProject?.id;
+                            return (
+                              <button
+                                key={project.id}
+                                onClick={() => {
+                                  setActiveProjectId(project.id);
+                                  setProjectMenuOpen(false);
+                                }}
+                                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors ${
+                                  selected ? "bg-accent/10 text-foreground" : "text-foreground-muted hover:bg-card hover:text-foreground"
+                                }`}
+                              >
+                                <span className={`h-2 w-2 rounded-full ${selected ? "bg-accent" : "bg-foreground-dim"}`} />
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-sm font-semibold">{project.name}</span>
+                                  <span className="text-[11px] text-foreground-dim">{project.role}</span>
+                                </span>
+                                {selected && <Check size={15} className="text-accent" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="border-t border-card-border p-2">
+                          <button
+                            onClick={() => {
+                              setProjectMenuOpen(false);
+                              openCreateProjectDialog();
+                            }}
+                            className="flex w-full items-center justify-center gap-2 rounded-lg border border-card-border px-3 py-2 text-xs font-semibold text-foreground-muted transition-colors hover:bg-card hover:text-foreground"
+                          >
+                            <Plus size={14} />
+                            New project
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
               {/* API status */}
               <motion.div
                 whileHover={{ scale: 1.04 }}
@@ -540,7 +685,44 @@ export default function Navbar() {
                 </motion.div>
               ))}
 
-              <div className="pt-3 border-t border-card-border-strong space-y-3">
+                <div className="pt-3 border-t border-card-border-strong space-y-3">
+                {user && (
+                  <div className="px-4 py-3 rounded-xl bg-card/50 border border-card-border space-y-3">
+                    <div className="flex items-center gap-2">
+                      <FolderKanban size={14} className="text-foreground-muted" />
+                      <span className="text-xs font-semibold text-foreground-muted uppercase">
+                        Active Project
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {projects.map((project) => {
+                        const selected = project.id === activeProject?.id;
+                        return (
+                          <button
+                            key={project.id}
+                            onClick={() => setActiveProjectId(project.id)}
+                            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                              selected ? "bg-accent/10 text-foreground" : "text-foreground-muted hover:bg-card-hover"
+                            }`}
+                          >
+                            <span className={`h-2 w-2 rounded-full ${selected ? "bg-accent" : "bg-foreground-dim"}`} />
+                            <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                            <span className="text-[10px] font-bold text-foreground-dim">{project.role}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={openCreateProjectDialog}
+                      disabled={creatingProject}
+                      className="w-full flex items-center justify-center gap-2 text-xs px-3 py-2 rounded-lg border border-card-border hover:bg-card-hover disabled:opacity-50"
+                    >
+                      <Plus size={13} />
+                      Create Project
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between px-4 py-2">
                   <div className="flex items-center gap-2">
                     <span
@@ -623,6 +805,70 @@ export default function Navbar() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <Dialog open={projectDialogOpen} onOpenChange={(open) => !creatingProject && setProjectDialogOpen(open)}>
+        <DialogContent className="glass-strong border-card-border-strong bg-background text-foreground">
+          <form onSubmit={handleCreateProject} className="space-y-5">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FolderKanban size={18} className="text-accent" />
+                Create project
+              </DialogTitle>
+              <DialogDescription className="text-foreground-muted">
+                Create an isolated workspace for documents, graph data, embeddings, activity, and future integrations.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2">
+              <label htmlFor="project-name" className="text-xs font-bold text-foreground-dim uppercase tracking-widest">
+                Project name
+              </label>
+              <Input
+                id="project-name"
+                value={projectName}
+                onChange={(event) => {
+                  setProjectName(event.target.value);
+                  if (projectError) setProjectError(null);
+                }}
+                placeholder="e.g. Billing Platform"
+                disabled={creatingProject}
+                maxLength={120}
+                className="glow-input border-card-border bg-card/40 text-foreground"
+                autoFocus
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-foreground-dim">Names are unique inside this organization.</p>
+                <p className="text-xs text-foreground-dim">{projectName.trim().length}/120</p>
+              </div>
+              {projectError && (
+                <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+                  {projectError}
+                </p>
+              )}
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setProjectDialogOpen(false)}
+                disabled={creatingProject}
+                className="rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={creatingProject || projectName.trim().length < 2}
+                className="rounded-xl"
+              >
+                {creatingProject ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                {creatingProject ? "Creating..." : "Create project"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </motion.header>
   );
 }

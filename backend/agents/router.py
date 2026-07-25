@@ -22,15 +22,15 @@ def route(question: str, provider: str = "groq") -> str:
     return result
 
 
-def run(question: str, source_filter: str = None, provider: str = "groq") -> dict:
+def run(question: str, source_filter: str = None, provider: str = "groq", project_id: str | None = None) -> dict:
     agent_type = route(question, provider=provider)
 
     if agent_type == "IMPACT":
         from agents.impact_agent import run_impact_agent
-        result = run_impact_agent(question, source_filter=source_filter, provider=provider)
+        result = run_impact_agent(question, source_filter=source_filter, provider=provider, project_id=project_id)
     else:
         from agents.query_agent import run_query_agent
-        result = run_query_agent(question, source_filter=source_filter, provider=provider)
+        result = run_query_agent(question, source_filter=source_filter, provider=provider, project_id=project_id)
 
     result["agent_used"] = agent_type
     return result

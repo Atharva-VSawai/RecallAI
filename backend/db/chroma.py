@@ -33,14 +33,28 @@ def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list[st
     return chunks
 
 
-def chroma_store(content: str, source: str, metadata: dict = None) -> str:
+def _where_filter(project_id: str | None = None, source_filter: str | None = None) -> dict | None:
+    clauses = []
+    if project_id:
+        clauses.append({"project_id": {"$eq": project_id}})
+    if source_filter:
+        clauses.append({"source": {"$eq": source_filter}})
+    if not clauses:
+        return None
+    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+
+
+def chroma_store(content: str, source: str, metadata: dict = None, project_id: str | None = None) -> str:
     chunks = _chunk_text(content)
     embeddings = _embeddings.embed_documents(chunks)
+    base_metadata = {"source": source, **(metadata or {})}
+    if project_id:
+        base_metadata["project_id"] = project_id
     try:
         _collection.add(
             documents=chunks,
             embeddings=embeddings,
-            metadatas=[{"source": source, **(metadata or {})} for _ in chunks],
+            metadatas=[base_metadata for _ in chunks],
             ids=[str(uuid.uuid4()) for _ in chunks],
         )
     except Exception as exc:
@@ -54,9 +68,13 @@ def chroma_store(content: str, source: str, metadata: dict = None) -> str:
     return f"Stored {len(chunks)} chunks in Chroma Cloud: {source}"
 
 
-def chroma_search(query: str, k: int = 4, source_filter: str = None) -> list:
+def chroma_search(query: str, k: int = 4, source_filter: str = None, project_id: str | None = None) -> list:
     embedding = _embeddings.embed_query(query)
-    where = {"source": {"$eq": source_filter}} if source_filter else None
+    legacy_default_project = project_id == "main-workspace"
+    where = _where_filter(
+        project_id=None if legacy_default_project else project_id,
+        source_filter=source_filter,
+    )
     try:
         results = _collection.query(
             query_embeddings=[embedding],
@@ -77,14 +95,24 @@ def chroma_search(query: str, k: int = 4, source_filter: str = None) -> list:
         # Hard-enforce filter: discard any result from a different source
         if source_filter and meta.get("source") != source_filter:
             continue
+        if project_id and meta.get("project_id") != project_id:
+            if not (legacy_default_project and "project_id" not in meta):
+                continue
         docs.append({"page_content": doc, "metadata": meta})
     return docs
 
-def chroma_delete_by_source(source: str) -> dict:
+def chroma_delete_by_source(source: str, project_id: str | None = None) -> dict:
     """Delete all text chunks matching the given source from Chroma."""
     try:
-        # ChromaDB allows deleting by metadata where clause
-        _collection.delete(where={"source": source})
+        _collection.delete(where=_where_filter(project_id=project_id, source_filter=source))
         return {"status": "success", "source": source}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+def chroma_delete_by_project(project_id: str) -> dict:
+    try:
+        _collection.delete(where={"project_id": {"$eq": project_id}})
+        return {"status": "success", "project_id": project_id}
     except Exception as e:
         return {"status": "error", "error": str(e)}

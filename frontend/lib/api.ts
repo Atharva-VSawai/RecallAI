@@ -30,6 +30,8 @@ async function authenticatedHeaders(headers: HeadersInit = {}): Promise<Headers>
   const session = await getValidSession();
   const result = new Headers(headers);
   result.set("Authorization", `Bearer ${session.access_token}`);
+  const projectId = getActiveProjectId();
+  if (projectId) result.set("X-Project-ID", projectId);
   return result;
 }
 
@@ -71,6 +73,21 @@ function getLlmProvider(): string {
   return 'groq';
 }
 
+function getActiveProjectId(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("recallai_active_project_id");
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  slug: string;
+  organization_id: string;
+  role: "OWNER" | "ADMIN" | "MANAGER" | "CONTRIBUTOR" | "VIEWER";
+  permissions: string[];
+  created_at?: string;
+}
+
 export interface SourceTrace {
   tool: string;
   args: Record<string, string>;
@@ -99,6 +116,7 @@ export interface ActivityEvent {
   description: string;
   timestamp: string;
   source?: string;
+  project_id?: string;
 }
 
 export interface FileMetadata {
@@ -107,6 +125,41 @@ export interface FileMetadata {
   type: string;
   source: string;
   uploaded_at: string;
+  project_id?: string;
+}
+
+export async function listProjects(): Promise<Project[]> {
+  const res = await authenticatedFetch(`${BASE}/projects`, { cache: "no-store" });
+  if (!res.ok) throw await readApiError(res, "Failed to fetch projects");
+  const data = await res.json();
+  return Array.isArray(data.projects) ? uniqueProjects(data.projects) : [];
+}
+
+export async function createProject(name: string): Promise<Project> {
+  const res = await authenticatedFetch(`${BASE}/projects`, {
+    method: "POST",
+    headers: await authenticatedHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await readApiError(res, "Failed to create project");
+  const data = await res.json();
+  return data.project;
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  const res = await authenticatedFetch(`${BASE}/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw await readApiError(res, "Failed to delete project");
+}
+
+export function uniqueProjects(projects: Project[]): Project[] {
+  const byKey = new Map<string, Project>();
+  for (const project of projects) {
+    const key = `${project.organization_id}:${project.slug || project.id}`;
+    if (!byKey.has(key)) byKey.set(key, project);
+  }
+  return Array.from(byKey.values());
 }
 
 export async function getActivityFeed(userId?: string): Promise<ActivityEvent[]> {

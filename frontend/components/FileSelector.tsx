@@ -3,10 +3,9 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FileText, Search, Calendar, CheckCircle2, Loader2, FileSpreadsheet, Music, Film, Image as ImageIcon, MessageSquare, File, RefreshCw, Trash2 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { listFiles, deleteFile, FileMetadata } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +21,7 @@ interface FileSelectorProps {
 }
 
 export default function FileSelector({ onSelectFile, selectedSource }: FileSelectorProps) {
+  const { activeProject, can } = useAuth();
   const [files, setFiles] = useState<FileMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +52,12 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
     const refreshOnFocus = debounced(10_000);
 
     window.addEventListener("recallai:files-changed", refreshFiles);
+    window.addEventListener("recallai:project-changed", refreshFiles);
     window.addEventListener("focus", refreshOnFocus);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       window.removeEventListener("recallai:files-changed", refreshFiles);
+      window.removeEventListener("recallai:project-changed", refreshFiles);
       window.removeEventListener("focus", refreshOnFocus);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
@@ -148,63 +150,71 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
   };
 
   return (
-    <div className="flex flex-col h-full space-y-4">
-      {/* Search Bar with Refresh */}
-      <div className="flex gap-2 flex-shrink-0">
+    <div className="flex h-full flex-col space-y-4">
+      <div className="rounded-xl border border-card-border bg-card/40 p-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-foreground-dim">Sources in workspace</p>
+        <div className="mt-1 flex items-center justify-between gap-3">
+          <p className="min-w-0 truncate text-sm font-semibold text-foreground">
+            {activeProject?.name ?? "Active project"}
+          </p>
+          <span className="rounded-md border border-card-border px-2 py-1 text-[10px] font-bold text-foreground-dim">
+            {files.length} {files.length === 1 ? "source" : "sources"}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-shrink-0 gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-dim" />
           <Input
-            placeholder="Search by filename or type..."
+            placeholder="Search sources..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="pl-10 h-12 text-base border-2 focus:border-[var(--warm-orange)] rounded-xl"
+            className="glow-input h-11 rounded-lg border-card-border bg-card/50 pl-10 text-sm"
           />
         </div>
         <button
           onClick={loadFiles}
           disabled={loading}
-          className="px-4 h-12 rounded-xl border-2 border-gray-200 hover:border-[var(--warm-orange)] hover:bg-[var(--warm-orange)]/10 transition-all disabled:opacity-50"
+          className="h-11 rounded-lg border border-card-border px-3 text-foreground-muted transition-colors hover:bg-card-hover hover:text-foreground disabled:opacity-50"
           title="Refresh files"
         >
-          <RefreshCw className={`w-5 h-5 text-gray-600 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
-      {/* Loading State */}
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 space-y-4 flex-1">
-          <Loader2 className="w-8 h-8 text-[var(--warm-orange)] animate-spin" />
-          <p className="text-sm text-gray-500">Loading your files...</p>
+        <div className="flex flex-1 flex-col items-center justify-center space-y-3 py-16">
+          <Loader2 className="h-6 w-6 animate-spin text-accent" />
+          <p className="text-sm text-foreground-muted">Loading project sources...</p>
         </div>
       ) : error ? (
-        <div className="flex flex-col items-center justify-center py-16 space-y-4 flex-1 text-center">
-          <p className="text-sm text-red-500">{error}</p>
+        <div className="flex flex-1 flex-col items-center justify-center space-y-4 py-16 text-center">
+          <p className="text-sm text-danger">{error}</p>
           <button
             onClick={loadFiles}
-            className="px-4 py-2 rounded-xl border border-gray-300 hover:border-[var(--warm-orange)] transition-colors"
+            className="rounded-lg border border-card-border px-4 py-2 text-sm text-foreground-muted transition-colors hover:bg-card-hover hover:text-foreground"
           >
             Try again
           </button>
         </div>
       ) : filteredFiles.length === 0 ? (
-        /* Empty State */
-        <div className="flex flex-col items-center justify-center py-16 space-y-4 flex-1">
-          <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
-            <FileText className="w-8 h-8 text-gray-400" />
+        <div className="flex flex-1 flex-col items-center justify-center space-y-4 py-16">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-card-border bg-card">
+            <FileText className="h-6 w-6 text-foreground-dim" />
           </div>
           <div className="text-center">
-            <p className="text-base font-semibold text-gray-900">
+            <p className="text-sm font-semibold text-foreground">
               {search ? "No files match your search" : "No files uploaded yet"}
             </p>
-            <p className="text-sm text-gray-500 mt-1">
-              {search ? "Try a different search term" : "Upload your first file to get started"}
+            <p className="mt-1 text-xs text-foreground-dim">
+              {search ? "Try another filename or source type." : "Sources added here stay isolated to this project."}
             </p>
           </div>
         </div>
       ) : (
-        /* File Grid */
-        <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-          <div className="grid gap-1.5 pb-2">
+        <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+          <div className="overflow-hidden rounded-xl border border-card-border">
             <AnimatePresence>
               {filteredFiles.map((file, i) => {
               const Icon = getFileIcon(file.type);
@@ -213,89 +223,75 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
               return (
                 <motion.div
                   key={file.source}
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ delay: i * 0.05 }}
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  whileTap={{ scale: 0.98 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ delay: Math.min(i * 0.02, 0.12) }}
                 >
-                  <Card
-                    className={`cursor-pointer transition-all duration-200 ${
-                      isSelected
-                        ? "border-2 border-[var(--warm-orange)] bg-[var(--warm-orange)]/10 shadow-lg"
-                        : "border-2 border-gray-200 hover:border-[var(--warm-orange-light)] hover:shadow-md"
+                  <div
+                    className={`group flex w-full items-center gap-3 border-b border-card-border px-3 py-3 text-left transition-colors last:border-b-0 ${
+                      isSelected ? "bg-accent/10" : "bg-card/25 hover:bg-card-hover"
                     }`}
-                    onClick={() => onSelectFile(file.source, file.filename)}
                   >
-                    <CardContent className="p-2.5">
-                      <div className="flex items-center gap-3">
-                        {/* Icon */}
-                        <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${getFileColor(file.type)} flex items-center justify-center flex-shrink-0 shadow-md`}>
-                          <Icon className="w-4 h-4 text-white" />
-                        </div>
-                        
-                        {/* File Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <h4 className="font-semibold text-xs text-gray-900 truncate">
-                              {file.filename}
-                            </h4>
-                            {isSelected && (
-                              <motion.div
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                                transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                              >
-                                <CheckCircle2 className="w-4 h-4 text-[var(--warm-orange)] flex-shrink-0" />
-                              </motion.div>
-                            )}
-                          </div>
-                          
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="text-xs font-medium py-0 px-1.5">
-                              {file.type.toUpperCase()}
-                            </Badge>
-                            {file.uploaded_at && (
-                              <span className="flex items-center gap-1 text-xs text-gray-500">
-                                <Calendar className="w-3 h-3" />
-                                {new Date(file.uploaded_at).toLocaleDateString('en-US', {
-                                  month: 'short',
-                                  day: 'numeric',
-                                  year: 'numeric'
-                                })}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Delete Button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setFileToDelete(file);
-                            setDeleteConfirmText("");
-                          }}
-                          className="p-2 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                          title="Delete file"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                    <button
+                      onClick={() => onSelectFile(file.source, file.filename)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${getFileColor(file.type)}`}>
+                        <Icon className="h-4 w-4 text-white" />
                       </div>
-                    </CardContent>
-                  </Card>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {file.filename}
+                          </p>
+                          {isSelected && (
+                            <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-accent" />
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-foreground-dim">
+                          <span className="rounded border border-card-border px-1.5 py-0.5 font-bold">
+                            {file.type.toUpperCase()}
+                          </span>
+                          {file.uploaded_at && (
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {new Date(file.uploaded_at).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+
+                    {can("knowledge:delete") && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFileToDelete(file);
+                          setDeleteConfirmText("");
+                        }}
+                        className="rounded-lg p-2 text-foreground-dim opacity-0 transition-all hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+                        title="Delete file"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
                 </motion.div>
               );
             })}
           </AnimatePresence>
-          </div>
+                        </div>
         </div>
       )}
 
-      {/* File Count */}
       {!loading && filteredFiles.length > 0 && (
-        <div className="text-center pt-2 border-t flex-shrink-0">
-          <p className="text-xs text-gray-500">
+        <div className="flex-shrink-0 border-t border-card-border pt-2 text-center">
+          <p className="text-xs text-foreground-dim">
             {filteredFiles.length} {filteredFiles.length === 1 ? 'file' : 'files'} available
             {search && ` matching "${search}"`}
           </p>

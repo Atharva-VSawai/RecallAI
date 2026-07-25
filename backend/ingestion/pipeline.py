@@ -41,6 +41,8 @@ def _structure_and_store(
     provider: str = "groq",
     store_graph: bool = True,
     store_vector: bool = True,
+    project_id: str | None = None,
+    organization_id: str = "default",
 ) -> dict:
     """Extract content and optionally write legacy projections.
 
@@ -49,7 +51,7 @@ def _structure_and_store(
     """
     if store_vector:
         from db.chroma import chroma_store
-        chroma_store(content=raw_text, source=source)
+        chroma_store(content=raw_text, source=source, project_id=project_id)
 
     llm = get_llm(provider)
     chain = PROMPT | llm.with_structured_output(ExtractionResult)
@@ -83,11 +85,13 @@ def _structure_and_store(
                 reason=item.get("reason", ""), source=source, people=item.get("people") or [],
                 impact=item.get("impact", ""), alternatives=item.get("alternatives") or [],
                 timestamp=str(item.get("timestamp") or ""),
+                project_id=project_id,
+                organization_id=organization_id,
             )
     return {"ingested": len(items), "items": items, "raw_text": raw_text}
 
 
-def run_ingestion(file_bytes: bytes, filename: str, source: str = "document", provider: str = "groq", store_graph: bool = True, store_vector: bool = True) -> dict:
+def run_ingestion(file_bytes: bytes, filename: str, source: str = "document", provider: str = "groq", store_graph: bool = True, store_vector: bool = True, project_id: str | None = None, organization_id: str = "default") -> dict:
     file_ext = filename.lower().rsplit(".", 1)[-1]
     if file_ext in {"xlsx", "xls"}:
         raw_text = extract_text_from_excel(file_bytes, filename)
@@ -100,8 +104,8 @@ def run_ingestion(file_bytes: bytes, filename: str, source: str = "document", pr
         raw_text = transcribe_audio(file_bytes, filename)
     else:
         raise ValueError(f"Unsupported file type: {file_ext}")
-    return _structure_and_store(raw_text, source, provider, store_graph, store_vector)
+    return _structure_and_store(raw_text, source, provider, store_graph, store_vector, project_id, organization_id)
 
 
-def run_ingestion_from_text(raw_text: str, source: str, provider: str = "groq", store_graph: bool = True, store_vector: bool = True) -> dict:
-    return _structure_and_store(raw_text, source, provider, store_graph, store_vector)
+def run_ingestion_from_text(raw_text: str, source: str, provider: str = "groq", store_graph: bool = True, store_vector: bool = True, project_id: str | None = None, organization_id: str = "default") -> dict:
+    return _structure_and_store(raw_text, source, provider, store_graph, store_vector, project_id, organization_id)

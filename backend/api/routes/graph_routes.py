@@ -1,14 +1,23 @@
 from fastapi import APIRouter, Depends
-from application.services.auth_service import AuthenticatedUser
-from api.dependencies import get_current_user
+from application.services.project_service import ProjectContext
+from api.dependencies import require_project_permission
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
 @router.get("/data")
-def graph_data(user: AuthenticatedUser = Depends(get_current_user)):
+def graph_data(project: ProjectContext = Depends(require_project_permission("knowledge:read"))):
     from db.neo import _driver
     with _driver.session() as session:
-        records = session.run("""MATCH (d:Decision) OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person) OPTIONAL MATCH (d)-[:BASED_ON]->(r:Reason) OPTIONAL MATCH (d)-[:ALTERNATIVE]->(a:Alternative) RETURN d,p,r,a""").data()
+        records = session.run(
+            """
+            MATCH (d:Decision {project_id: $project_id})
+            OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person)
+            OPTIONAL MATCH (d)-[:BASED_ON]->(r:Reason)
+            OPTIONAL MATCH (d)-[:ALTERNATIVE]->(a:Alternative)
+            RETURN d,p,r,a
+            """,
+            project_id=project.project_id,
+        ).data()
     nodes, edges = {}, set()
     for record in records:
         decision = record["d"]

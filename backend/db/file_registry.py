@@ -13,51 +13,67 @@ def _compute_hash(file_bytes: bytes) -> str:
     """Compute SHA256 hash of file content."""
     return hashlib.sha256(file_bytes).hexdigest()
 
-def register_file(filename: str, file_hash: str, file_type: str, source: str) -> dict:
+def register_file(filename: str, file_hash: str, file_type: str, source: str, project_id: str | None = None, organization_id: str = "default") -> dict:
     """Register a new file in Neo4j."""
     with _driver.session() as session:
         result = session.run(
             """
-            MERGE (f:File {hash: $hash})
+            MERGE (p:Project {id: $project_id})
+            ON CREATE SET p.name = $project_id,
+                          p.slug = $project_id,
+                          p.organization_id = $organization_id,
+                          p.status = 'ACTIVE'
+            MERGE (f:File {hash: $hash, project_id: $project_id})
             SET f.filename = $filename,
                 f.type = $file_type,
                 f.source = $source,
-                f.uploaded_at = $timestamp
+                f.uploaded_at = $timestamp,
+                f.organization_id = $organization_id
+            MERGE (f)-[:BELONGS_TO]->(p)
             RETURN f.filename as filename, f.hash as hash, f.type as type, 
-                   f.source as source, f.uploaded_at as uploaded_at
+                   f.source as source, f.uploaded_at as uploaded_at,
+                   f.project_id as project_id
             """,
             hash=file_hash,
             filename=filename,
             file_type=file_type,
             source=source,
+            project_id=project_id or "main-workspace",
+            organization_id=organization_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
         return result.single().data()
 
-def check_file_exists(file_hash: str) -> dict | None:
+def check_file_exists(file_hash: str, project_id: str | None = None) -> dict | None:
     """Check if file already exists by hash."""
     with _driver.session() as session:
         result = session.run(
             """
             MATCH (f:File {hash: $hash})
+            WHERE ($project_id IS NULL OR f.project_id = $project_id)
             RETURN f.filename as filename, f.hash as hash, f.type as type,
-                   f.source as source, f.uploaded_at as uploaded_at
+                   f.source as source, f.uploaded_at as uploaded_at,
+                   f.project_id as project_id
             """,
             hash=file_hash,
+            project_id=project_id,
         )
         record = result.single()
         return record.data() if record else None
 
-def list_all_files() -> list[dict]:
+def list_all_files(project_id: str | None = None) -> list[dict]:
     """List all registered files."""
     with _driver.session() as session:
         # Get explicitly registered File nodes
         result = session.run(
             """
             MATCH (f:File)
+            WHERE ($project_id IS NULL OR f.project_id = $project_id)
             RETURN f.filename as filename, f.hash as hash, f.type as type,
-                   f.source as source, f.uploaded_at as uploaded_at
-            """
+                   f.source as source, f.uploaded_at as uploaded_at,
+                   f.project_id as project_id
+            """,
+            project_id=project_id,
         )
         registered = {r["source"]: r.data() for r in result}
 
@@ -65,6 +81,7 @@ def list_all_files() -> list[dict]:
         result = session.run(
             """
             MATCH (d:Decision)
+            WHERE ($project_id IS NULL OR d.project_id = $project_id)
             WITH DISTINCT d.source as source
             WHERE source IS NOT NULL AND source <> ''
             WITH source,
@@ -93,8 +110,9 @@ def list_all_files() -> list[dict]:
                    WHEN source STARTS WITH 'slack:' THEN 'slack'
                    ELSE 'unknown'
                  END as type
-            RETURN filename, '' as hash, type, source, '' as uploaded_at
-            """
+            RETURN filename, '' as hash, type, source, '' as uploaded_at, $project_id as project_id
+            """,
+            project_id=project_id,
         )
         for r in result:
             if r["source"] not in registered:
@@ -103,31 +121,36 @@ def list_all_files() -> list[dict]:
         files = sorted(registered.values(), key=lambda f: f.get("uploaded_at") or "", reverse=True)
         return files
 
-def get_file_by_source(source: str) -> dict | None:
+def get_file_by_source(source: str, project_id: str | None = None) -> dict | None:
     """Get file metadata by source identifier."""
     with _driver.session() as session:
         result = session.run(
             """
             MATCH (f:File {source: $source})
+            WHERE ($project_id IS NULL OR f.project_id = $project_id)
             RETURN f.filename as filename, f.hash as hash, f.type as type,
-                   f.source as source, f.uploaded_at as uploaded_at
+                   f.source as source, f.uploaded_at as uploaded_at,
+                   f.project_id as project_id
             """,
             source=source,
+            project_id=project_id,
         )
         record = result.single()
         return record.data() if record else None
 
-def delete_file_by_source(source: str) -> dict:
+def delete_file_by_source(source: str, project_id: str | None = None) -> dict:
     """Delete a file and all its associated decisions from Neo4j."""
     with _driver.session() as session:
         # First delete all Decision nodes associated with this source
         decision_result = session.run(
             """
             MATCH (d:Decision {source: $source})
+            WHERE ($project_id IS NULL OR d.project_id = $project_id)
             DETACH DELETE d
             RETURN count(d) as deleted_decisions
             """,
-            source=source
+            source=source,
+            project_id=project_id,
         )
         deleted_decisions = decision_result.single()["deleted_decisions"]
 
@@ -135,10 +158,12 @@ def delete_file_by_source(source: str) -> dict:
         file_result = session.run(
             """
             MATCH (f:File {source: $source})
+            WHERE ($project_id IS NULL OR f.project_id = $project_id)
             DETACH DELETE f
             RETURN count(f) as deleted_files
             """,
-            source=source
+            source=source,
+            project_id=project_id,
         )
         deleted_files = file_result.single()["deleted_files"]
 

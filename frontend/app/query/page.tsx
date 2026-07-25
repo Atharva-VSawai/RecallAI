@@ -2,11 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
 import {
   Send, Loader2, RotateCcw, ChevronDown, ChevronUp,
   Upload, FileText, CheckCircle2, XCircle, X, MessageSquare,
-  Hash, Mic, FileSpreadsheet, Image as ImageIcon, Sparkles, Brain,
+  Hash, Mic, FileSpreadsheet, Image as ImageIcon, Brain, FolderKanban, ShieldCheck,
 } from "lucide-react";
 import {
   queryKnowledge, ingestFile, ingestSlack, ingestAudio,
@@ -233,7 +233,7 @@ function IngestSuccess({
         <div>
           <p className="text-sm text-success font-semibold">{label}</p>
           <p className="text-xs text-success/70 mt-0.5">
-            Decisions extracted · stored in Neo4j + ChromaDB
+            Knowledge extracted and indexed for this project
           </p>
         </div>
       </div>
@@ -303,40 +303,17 @@ function IngestError({ error, onReset }: { error: string; onReset: () => void })
 // Main page
 // ─────────────────────────────────────────────────────────────
 export default function QueryPage() {
-  const { user } = useAuth();
+  const { user, activeProject, can } = useAuth();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<Tab>("query");
   const pageRef = useRef<HTMLDivElement>(null);
 
-  // Mouse-parallax orbs
-  const rawX = useMotionValue(0);
-  const rawY = useMotionValue(0);
-  const orbX = useSpring(rawX, { stiffness: 50, damping: 25 });
-  const orbY = useSpring(rawY, { stiffness: 50, damping: 25 });
-  const orbX2 = useTransform(orbX, v => -v * 0.6);
-  const orbY2 = useTransform(orbY, v => -v * 0.6);
-
-  useEffect(() => {
-    const handle = (e: MouseEvent) => {
-      const x = (e.clientX / window.innerWidth - 0.5) * 60;
-      const y = (e.clientY / window.innerHeight - 0.5) * 40;
-      rawX.set(x);
-      rawY.set(y);
-    };
-    window.addEventListener("mousemove", handle);
-    return () => window.removeEventListener("mousemove", handle);
-  }, [rawX, rawY]);
-
-  // Search bar glow
-  const glowX = useMotionValue(0);
-  const glowY = useMotionValue(0);
-  const transformGlowX = useTransform(glowX, v => v - 120);
-  const transformGlowY = useTransform(glowY, v => v - 120);
   const [barFocus, setBarFocus] = useState(false);
 
   // ── Shared context ─────────────────────────────────────────
   const [contextLabel, setContextLabel] = useState<string | null>(null);
   const [sourceContext, setSourceContext] = useState<string | null>(null);
+  const canWriteKnowledge = can("knowledge:write");
 
   useEffect(() => {
     const source = searchParams.get("source");
@@ -347,6 +324,18 @@ export default function QueryPage() {
       setContextLabel(`${icon} ${filename}`);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const resetProjectContext = () => {
+      setSourceContext(null);
+      setContextLabel(null);
+      setResult(null);
+      setQueryError(null);
+      if (tab !== "query") setTab("query");
+    };
+    window.addEventListener("recallai:project-changed", resetProjectContext);
+    return () => window.removeEventListener("recallai:project-changed", resetProjectContext);
+  }, [tab]);
 
   // ── Query state ────────────────────────────────────────────
   const [question, setQuestion] = useState("");
@@ -414,6 +403,7 @@ export default function QueryPage() {
     if (file?.type === "application/pdf") setSelectedFile(file);
   }
   async function handleUpload() {
+    if (!canWriteKnowledge) { setUploadState("error"); setUploadError("You do not have permission to upload knowledge in this project."); return; }
     if (!selectedFile) return;
     const validationError = validateFile(selectedFile, ["pdf"]);
     if (validationError) { setUploadState("error"); setUploadError(validationError); return; }
@@ -444,6 +434,7 @@ export default function QueryPage() {
     if (ext === "xlsx" || ext === "xls") setSelectedExcel(file);
   }
   async function handleExcelUpload() {
+    if (!canWriteKnowledge) { setExcelState("error"); setExcelError("You do not have permission to upload knowledge in this project."); return; }
     if (!selectedExcel) return;
     const validationError = validateFile(selectedExcel, ["xlsx", "xls"]);
     if (validationError) { setExcelState("error"); setExcelError(validationError); return; }
@@ -468,6 +459,7 @@ export default function QueryPage() {
 
   // ── Slack ──────────────────────────────────────────────────
   async function handleSlackIngest() {
+    if (!canWriteKnowledge) { setSlackState("error"); setSlackError("You do not have permission to ingest Slack messages in this project."); return; }
     const validationError = validateSlackChannel(channelId);
     if (validationError) { setSlackState("error"); setSlackError(validationError); return; }
     setSlackState("loading"); setSlackError(null); setSlackResult(null);
@@ -490,6 +482,7 @@ export default function QueryPage() {
 
   // ── Audio ──────────────────────────────────────────────────
   async function handleAudioUpload() {
+    if (!canWriteKnowledge) { setAudioState("error"); setAudioError("You do not have permission to upload knowledge in this project."); return; }
     if (!audioFile) return;
     const validationError = validateFile(audioFile, ["mp3", "wav", "m4a", "flac", "ogg", "mp4", "mov", "avi", "mkv", "webm"]);
     if (validationError) { setAudioState("error"); setAudioError(validationError); return; }
@@ -522,6 +515,7 @@ export default function QueryPage() {
     }
   }
   async function handleImageUpload() {
+    if (!canWriteKnowledge) { setImageState("error"); setImageError("You do not have permission to upload knowledge in this project."); return; }
     if (!imageFile) return;
     setImageState("loading"); setImageError(null); setImageResult(null);
     try {
@@ -553,14 +547,15 @@ export default function QueryPage() {
     setTab(id);
   }
 
-  const TABS: { id: Tab; label: string; icon: React.ElementType; color: string }[] = [
-    { id: "query",  label: "Query",        icon: Brain,          color: "from-accent to-accent-2" },
-    { id: "upload", label: "PDF",          icon: FileText,       color: "from-accent-2 to-accent-3" },
-    { id: "excel",  label: "Excel",        icon: FileSpreadsheet, color: "from-accent-3 to-accent" },
-    { id: "audio",  label: "Audio",        icon: Mic,            color: "from-warning to-accent-2" },
-    { id: "image",  label: "Image OCR",   icon: ImageIcon,      color: "from-accent-3 to-warning" },
-    { id: "slack",  label: "Slack",        icon: MessageSquare,  color: "from-accent to-accent-3" },
+  const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+    { id: "query",  label: "Ask",        icon: Brain },
+    { id: "upload", label: "PDF",          icon: FileText },
+    { id: "excel",  label: "Excel",        icon: FileSpreadsheet },
+    { id: "audio",  label: "Audio",        icon: Mic },
+    { id: "image",  label: "Image OCR",   icon: ImageIcon },
+    { id: "slack",  label: "Slack",        icon: MessageSquare },
   ];
+  const visibleTabs = canWriteKnowledge ? TABS : TABS.filter((item) => item.id === "query");
 
   const tabPanelVariants = {
     enter: { opacity: 0, y: 16, scale: 0.98 },
@@ -569,21 +564,9 @@ export default function QueryPage() {
   };
 
   return (
-    <div ref={pageRef} className="relative min-h-screen overflow-hidden">
+    <div ref={pageRef} className="relative min-h-screen overflow-hidden bg-background">
       {/* ── Parallax orbs ─────────────────────────────────────── */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <motion.div
-          style={{ x: orbX, y: orbY }}
-          className="orb orb-cyan absolute w-[600px] h-[600px] -top-48 -right-48 opacity-25"
-        />
-        <motion.div
-          style={{ x: orbX2, y: orbY2 }}
-          className="orb orb-violet absolute w-[500px] h-[500px] -bottom-32 -left-48 opacity-20"
-        />
-        <motion.div
-          style={{ x: orbX, y: orbY2 }}
-          className="orb orb-pink absolute w-[350px] h-[350px] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-10"
-        />
         {/* Grid lines */}
         <div className="absolute inset-0 opacity-[0.035]"
           style={{
@@ -593,84 +576,56 @@ export default function QueryPage() {
         />
       </div>
 
-      <div className="relative z-10 max-w-4xl mx-auto px-6 py-24 md:py-32">
+      <div className="relative z-10 max-w-5xl mx-auto px-6 py-24 md:py-28">
 
         {/* ── Header ──────────────────────────────────────────── */}
         <motion.div
-          initial={{ opacity: 0, y: -32 }}
+          initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-          className="mb-14 text-center"
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="mb-8 rounded-xl border border-card-border-strong bg-card/45 p-5"
         >
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
-            className="inline-flex items-center gap-2 glass rounded-full px-5 py-2 text-xs font-bold text-foreground-muted border border-card-border mb-6 shadow-lg"
-          >
-            <motion.div
-              animate={{ rotate: [0, 360] }}
-              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-            >
-              <Sparkles size={13} className="text-accent" />
-            </motion.div>
-            AI-Powered Knowledge Engine
-          </motion.div>
-
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.25 }}
-            className="text-5xl md:text-7xl font-black font-display leading-none mb-5"
-          >
-            Knowledge{" "}
-            <span className="text-gradient">Engine</span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
-            className="text-lg text-foreground-muted max-w-2xl mx-auto leading-relaxed"
-          >
-            Ingest from Slack, PDF, Excel, Audio, or Images — then query across your entire organizational memory.
-          </motion.p>
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground-dim">
+                <FolderKanban size={14} />
+                Workspace
+              </div>
+              <h1 className="mt-2 text-2xl font-bold tracking-tight text-foreground md:text-3xl">
+                {activeProject?.name ?? "Project memory"}
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground-muted">
+                Search, ingest, and review knowledge inside this project only. Files, graph data, vectors, and activity are isolated from every other workspace.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 rounded-lg border border-card-border bg-background-secondary/70 px-3 py-2">
+              <ShieldCheck size={16} className="text-success" />
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-dim">Access</p>
+                <p className="text-xs font-semibold text-foreground">{activeProject?.role ?? "Viewer"}</p>
+              </div>
+            </div>
+          </div>
         </motion.div>
 
         {/* ── Tabs ────────────────────────────────────────────── */}
-        <FadeUp delay={0.1} className="flex justify-center mb-10">
-          <div className="inline-flex flex-wrap justify-center gap-2 p-2 rounded-3xl glass-strong border border-card-border shadow-2xl">
-            {TABS.map(({ id, label, icon: Icon, color }, index) => (
+        <FadeUp delay={0.05} className="mb-6">
+          <div className="flex flex-wrap gap-1 rounded-xl border border-card-border bg-card/35 p-1">
+            {visibleTabs.map(({ id, label, icon: Icon }, index) => (
               <motion.button
                 key={id}
                 onClick={() => switchTab(id)}
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 + index * 0.07 }}
-                whileHover={{ scale: 1.07, y: -2 }}
-                whileTap={{ scale: 0.95 }}
-                className={`relative flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-bold transition-all duration-200 overflow-hidden ${
+                transition={{ delay: 0.05 + index * 0.03 }}
+                className={`relative flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
                   tab === id
-                    ? "text-white shadow-lg"
-                    : "text-foreground-muted hover:text-foreground"
+                    ? "bg-background-secondary text-foreground shadow-sm"
+                    : "text-foreground-muted hover:bg-card-hover hover:text-foreground"
                 }`}
               >
-                {tab === id && (
-                  <motion.div
-                    layoutId="activeTab"
-                    className={`absolute inset-0 rounded-full bg-gradient-to-r ${color}`}
-                    style={{ boxShadow: "0 0 20px rgba(6,182,212,0.35)" }}
-                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                  />
-                )}
-                <motion.span
-                  className="relative z-10"
-                  animate={tab === id ? { rotate: [0, 10, -10, 0] } : {}}
-                  transition={{ duration: 0.4 }}
-                >
-                  <Icon size={15} />
-                </motion.span>
-                <span className="relative z-10 whitespace-nowrap">{label}</span>
+                <Icon size={15} />
+                <span className="whitespace-nowrap">{label}</span>
               </motion.button>
             ))}
           </div>
@@ -721,57 +676,15 @@ export default function QueryPage() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.97 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4 }}
-                whileHover={{ scale: 1.01 }}
-                onMouseMove={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  glowX.set(e.clientX - rect.left);
-                  glowY.set(e.clientY - rect.top);
-                }}
+                transition={{ duration: 0.25 }}
                 className="relative"
               >
-                {/* Cursor-following inner glow */}
-                <motion.div
-                  className="absolute rounded-3xl pointer-events-none"
-                  style={{
-                    width: 240,
-                    height: 240,
-                    x: transformGlowX,
-                    y: transformGlowY,
-                    background: "radial-gradient(circle, rgba(6,182,212,0.3) 0%, rgba(139,92,246,0.1) 50%, transparent 85%)",
-                    filter: "blur(20px)",
-                    opacity: barFocus ? 1 : 0.5,
-                  }}
-                />
-
-                {/* Outer glow ring when focused */}
-                <AnimatePresence>
-                  {barFocus && (
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      className="absolute -inset-px rounded-3xl pointer-events-none"
-                      style={{
-                        background: "linear-gradient(135deg, rgba(6,182,212,0.4), rgba(139,92,246,0.3))",
-                        filter: "blur(8px)",
-                        zIndex: -1,
-                      }}
-                    />
-                  )}
-                </AnimatePresence>
-
                 <div
-                  className={`relative flex items-center gap-3 glass-strong rounded-3xl border transition-colors duration-300 px-5 py-4 ${
-                    barFocus ? "border-accent/60" : "border-card-border"
+                  className={`relative flex items-center gap-3 rounded-xl border bg-card/45 px-4 py-3 transition-colors duration-200 ${
+                    barFocus ? "border-accent/70 bg-card-hover" : "border-card-border"
                   }`}
                 >
-                  <motion.div
-                    animate={barFocus ? { scale: 1.15, color: "var(--accent)" } : { scale: 1 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    <Brain size={20} className="text-foreground-dim shrink-0" />
-                  </motion.div>
+                  <Brain size={18} className="shrink-0 text-foreground-dim" />
                   <input
                     ref={inputRef}
                     value={question}
@@ -779,15 +692,14 @@ export default function QueryPage() {
                     onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
                     onFocus={() => setBarFocus(true)}
                     onBlur={() => setBarFocus(false)}
-                    placeholder="Why did we choose React over Vue?"
-                    className="flex-1 bg-transparent text-foreground placeholder:text-foreground-dim outline-none text-lg font-medium"
+                    placeholder="Ask a question about this project's knowledge..."
+                    className="flex-1 bg-transparent text-sm font-medium text-foreground outline-none placeholder:text-foreground-dim"
                   />
                   <motion.button
                     onClick={() => handleSubmit()}
                     disabled={loading || !question.trim()}
-                    whileHover={{ scale: 1.12, rotate: 4 }}
-                    whileTap={{ scale: 0.9, rotate: -4 }}
-                    className="shrink-0 p-3.5 rounded-2xl text-white disabled:opacity-30 disabled:cursor-not-allowed bg-gradient-to-br from-accent to-accent-2 shadow-lg shadow-accent/30 transition-opacity"
+                    whileTap={{ scale: 0.97 }}
+                    className="shrink-0 rounded-lg bg-accent px-3 py-2 text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {loading ? (
                       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
@@ -810,14 +722,12 @@ export default function QueryPage() {
                     className="mt-6 flex justify-start"
                   >
                     <motion.div
-                      className="glass-strong px-6 py-4 rounded-2xl rounded-tl-sm border border-card-border flex items-center gap-3 text-sm font-semibold text-foreground-muted"
-                      animate={{ boxShadow: ["0 0 0 0 rgba(6,182,212,0)", "0 0 30px 2px rgba(6,182,212,0.2)", "0 0 0 0 rgba(6,182,212,0)"] }}
-                      transition={{ duration: 2, repeat: Infinity }}
+                      className="flex items-center gap-3 rounded-xl border border-card-border bg-card/45 px-4 py-3 text-sm font-semibold text-foreground-muted"
                     >
                       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}>
                         <Loader2 size={16} className="text-accent" />
                       </motion.div>
-                      <span>Thinking<motion.span animate={{ opacity: [1, 0, 1] }} transition={{ duration: 1.2, repeat: Infinity }}>…</motion.span></span>
+                      <span>Searching project memory...</span>
                     </motion.div>
                   </motion.div>
                 )}
@@ -838,9 +748,8 @@ export default function QueryPage() {
                       <span className="text-xs text-foreground-dim">{result.reasoning}</span>
                     </div>
                     <motion.div
-                      whileHover={{ scale: 1.005, y: -2 }}
-                      transition={{ duration: 0.25 }}
-                      className="glass-strong rounded-3xl p-6 border border-card-border text-foreground leading-relaxed whitespace-pre-wrap shadow-2xl"
+                      transition={{ duration: 0.2 }}
+                      className="rounded-xl border border-card-border bg-card/55 p-5 text-sm leading-7 text-foreground whitespace-pre-wrap"
                     >
                       {result.answer}
                     </motion.div>
@@ -882,9 +791,8 @@ export default function QueryPage() {
                     <div className="flex justify-center pt-2">
                       <motion.button
                         onClick={() => { setResult(null); setShowSources(false); inputRef.current?.focus(); }}
-                        whileHover={{ scale: 1.05 }}
                         whileTap={{ scale: 0.95 }}
-                        className="text-xs text-foreground-dim hover:text-foreground transition-colors flex items-center gap-1.5 glass px-4 py-2 rounded-full border border-card-border"
+                        className="flex items-center gap-1.5 rounded-lg border border-card-border bg-card/35 px-3 py-2 text-xs text-foreground-dim transition-colors hover:bg-card-hover hover:text-foreground"
                       >
                         <RotateCcw size={12} /> New query
                       </motion.button>
@@ -915,8 +823,8 @@ export default function QueryPage() {
               {!result && !loading && !queryError && (
                 <FadeUp delay={0.1} className="mt-8 space-y-4">
                   <p className="text-xs font-bold text-foreground-dim uppercase tracking-widest flex items-center gap-2">
-                    <Sparkles size={11} className="text-accent" />
-                    Try asking
+                    <Brain size={11} className="text-accent" />
+                    Suggested questions
                   </p>
                   <div className="flex flex-wrap gap-2.5">
                     {SUGGESTIONS.map((s, i) => (
@@ -924,11 +832,10 @@ export default function QueryPage() {
                         key={s}
                         initial={{ opacity: 0, y: 14, scale: 0.9 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        transition={{ delay: 0.15 + i * 0.08, type: "spring" }}
-                        whileHover={{ scale: 1.06, y: -3, boxShadow: "0 8px 24px rgba(6,182,212,0.18)" }}
+                        transition={{ delay: 0.1 + i * 0.04 }}
                         whileTap={{ scale: 0.96 }}
                         onClick={() => handleSubmit(s)}
-                        className="text-sm px-5 py-2.5 rounded-full border border-card-border glass text-foreground-muted hover:text-foreground hover:border-accent/50 transition-all font-medium"
+                        className="rounded-lg border border-card-border bg-card/35 px-4 py-2 text-sm font-medium text-foreground-muted transition-colors hover:bg-card-hover hover:text-foreground"
                       >
                         {s}
                       </motion.button>
@@ -944,7 +851,7 @@ export default function QueryPage() {
             <motion.div key="upload" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
               <FadeUp>
                 <p className="text-sm text-foreground-muted leading-relaxed">
-                  Upload a PDF — the IngestionAgent extracts decisions, people, and context, then stores them in Neo4j + ChromaDB.
+                  Upload a PDF to add decisions, people, and supporting context to this project workspace.
                 </p>
               </FadeUp>
               <FadeUp delay={0.05}>
@@ -983,7 +890,7 @@ export default function QueryPage() {
             <motion.div key="excel" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
               <FadeUp>
                 <p className="text-sm text-foreground-muted leading-relaxed">
-                  Upload an Excel file — the IngestionAgent extracts decisions, people, and context, then stores them in Neo4j + ChromaDB.
+                  Upload an Excel file to capture structured knowledge from project trackers, logs, or decision registers.
                 </p>
               </FadeUp>
               <FadeUp delay={0.05}>
@@ -1021,7 +928,7 @@ export default function QueryPage() {
             <motion.div key="audio" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
               <FadeUp>
                 <p className="text-sm text-foreground-muted leading-relaxed">
-                  Upload audio or video — we&apos;ll transcribe it using Whisper, then extract decisions and store them in Neo4j + ChromaDB.
+                  Upload audio or video to capture meeting decisions and supporting context for this project.
                 </p>
               </FadeUp>
               <FadeUp delay={0.05}>
@@ -1060,7 +967,7 @@ export default function QueryPage() {
             <motion.div key="image" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
               <FadeUp>
                 <p className="text-sm text-foreground-muted leading-relaxed">
-                  Upload an image — we&apos;ll extract text using Groq Vision OCR, then extract decisions and store them in Neo4j + ChromaDB.
+                  Upload an image to extract readable text and add relevant knowledge to this project.
                 </p>
               </FadeUp>
               <FadeUp delay={0.05}>
@@ -1106,12 +1013,12 @@ export default function QueryPage() {
             <motion.div key="slack" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
               <FadeUp>
                 <p className="text-sm text-foreground-muted leading-relaxed">
-                  Fetch messages from a Slack channel — the IngestionAgent extracts decisions and stores them in Neo4j + ChromaDB.
+                  Fetch messages from a Slack channel and index relevant decisions inside this project.
                 </p>
               </FadeUp>
 
               <FadeUp delay={0.06}>
-                <div className="glass-strong rounded-3xl border border-card-border p-6 space-y-6">
+                <div className="rounded-xl border border-card-border bg-card/45 p-6 space-y-6">
                   {/* Channel ID */}
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-foreground-dim uppercase tracking-widest flex items-center gap-1.5">

@@ -20,7 +20,7 @@ app.add_middleware(
     # preflight as the misleading generic `Failed to fetch` error.
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$",
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Authorization", "Content-Type", "X-LLM-Provider", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-LLM-Provider", "X-Project-ID", "X-Request-ID"],
 )
 register_exception_handlers(app)
 app.include_router(api_router)

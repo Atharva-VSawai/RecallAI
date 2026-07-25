@@ -41,7 +41,7 @@ Example bad answer: [returning entire transcript or making up information]
 """
 
 
-def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list, list, list]:
+def _run_tools_directly(question: str, source_filter: str = None, project_id: str | None = None) -> tuple[list, list, list]:
     """Fallback: run both tools directly with the question as query."""
     tools_used = []
     source_trace = []
@@ -51,6 +51,8 @@ def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list,
         args = {"query": question}
         if source_filter:
             args["source_filter"] = source_filter
+        if project_id:
+            args["project_id"] = project_id
         result = tool_fn.invoke(args)
         tools_used.append(tool_name)
         source_trace.append({"tool": tool_name, "args": args, "result_preview": result[:200]})
@@ -59,7 +61,7 @@ def _run_tools_directly(question: str, source_filter: str = None) -> tuple[list,
     return tool_results, tools_used, source_trace
 
 
-def run_query_agent(question: str, source_filter: str = None, provider: str = "groq") -> dict:
+def run_query_agent(question: str, source_filter: str = None, provider: str = "groq", project_id: str | None = None) -> dict:
     logger.info(f"[QUERY AGENT] Question: {question} | Filter: {source_filter} | Provider: {provider}")
 
     llm_base = get_llm(provider)
@@ -68,6 +70,8 @@ def run_query_agent(question: str, source_filter: str = None, provider: str = "g
     messages = [SystemMessage(content=SYSTEM)]
     if source_filter:
         messages.append(SystemMessage(content=f"CRITICAL: User is querying ONLY from source '{source_filter}'. You MUST pass source_filter='{source_filter}' to ALL tool calls. REJECT any information from other sources."))
+    if project_id:
+        messages.append(SystemMessage(content=f"CRITICAL: User is working inside project_id '{project_id}'. You MUST pass project_id='{project_id}' to ALL tool calls."))
 
     messages.append(HumanMessage(content=question))
 
@@ -77,7 +81,7 @@ def run_query_agent(question: str, source_filter: str = None, provider: str = "g
     try:
         if provider == "ollama":
             logger.info("[QUERY AGENT] Provider is ollama, using direct tool execution")
-            tool_results, tools_used, source_trace = _run_tools_directly(question, source_filter)
+            tool_results, tools_used, source_trace = _run_tools_directly(question, source_filter, project_id)
             context = "\n\n".join(tool_results)
             fallback_messages = [SystemMessage(content=SYSTEM)]
             fallback_messages.append(HumanMessage(content=f"Context from knowledge base:\n{context}\n\nQuestion: {question}"))
@@ -100,6 +104,8 @@ def run_query_agent(question: str, source_filter: str = None, provider: str = "g
                 args = dict(tc["args"]) if tc["args"] else {}
                 if source_filter:
                     args["source_filter"] = source_filter
+                if project_id:
+                    args["project_id"] = project_id
                 logger.info(f"[QUERY AGENT] → tool: {tc['name']} args={args}")
                 result = tools_map[tc["name"]].invoke(args)
                 source_trace.append({
@@ -111,7 +117,7 @@ def run_query_agent(question: str, source_filter: str = None, provider: str = "g
     except Exception as e:
         if "tool_use_failed" in str(e) or "400" in str(e):
             logger.warning(f"[QUERY AGENT] Tool call failed, falling back to direct tool execution: {e}")
-            tool_results, tools_used, source_trace = _run_tools_directly(question, source_filter)
+            tool_results, tools_used, source_trace = _run_tools_directly(question, source_filter, project_id)
             context = "\n\n".join(tool_results)
             fallback_messages = [SystemMessage(content=SYSTEM)]
             fallback_messages.append(HumanMessage(content=f"Context from knowledge base:\n{context}\n\nQuestion: {question}"))

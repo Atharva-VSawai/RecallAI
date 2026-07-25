@@ -24,6 +24,8 @@ def neo_store(
     impact: str = "",
     alternatives: list = None,
     timestamp: str = "",
+    project_id: str | None = None,
+    organization_id: str = "default",
 ) -> str:
     decision_id = str(uuid.uuid4())
     max_retries = 3
@@ -34,25 +36,35 @@ def neo_store(
             with _driver.session() as session:
                 session.run(
                     """
-                    MERGE (d:Decision {action: $action})
-                    SET d.id        = $decision_id,
+                    MERGE (org:Organization {id: $organization_id})
+                    MERGE (project:Project {id: $project_id})
+                    ON CREATE SET project.name = $project_id,
+                                  project.slug = $project_id,
+                                  project.organization_id = $organization_id,
+                                  project.status = 'ACTIVE'
+                    SET project.organization_id = coalesce(project.organization_id, $organization_id)
+                    CREATE (d:Decision {id: $decision_id})
+                    SET d.action    = $action,
                         d.subject   = $subject,
                         d.impact    = $impact,
                         d.source    = $source,
-                        d.timestamp = $timestamp
-                    WITH d
+                        d.timestamp = $timestamp,
+                        d.project_id = $project_id,
+                        d.organization_id = $organization_id
+                    MERGE (d)-[:BELONGS_TO]->(project)
+                    WITH d, project
                     FOREACH (person IN $people |
-                        MERGE (p:Person {name: person})
+                        MERGE (p:Person {name: person, project_id: $project_id})
                         MERGE (d)-[:MADE_BY]->(p)
                     )
                     WITH d
                     FOREACH (alt IN $alternatives |
-                        MERGE (a:Alternative {text: alt})
+                        MERGE (a:Alternative {text: alt, project_id: $project_id})
                         MERGE (d)-[:ALTERNATIVE]->(a)
                     )
                     WITH d
                     FOREACH (r IN CASE WHEN $reason <> '' THEN [$reason] ELSE [] END |
-                        MERGE (rn:Reason {text: r})
+                        MERGE (rn:Reason {text: r, project_id: $project_id})
                         MERGE (d)-[:BASED_ON]->(rn)
                     )
                     """,
@@ -62,6 +74,8 @@ def neo_store(
                     people=people or [],
                     alternatives=alternatives or [],
                     reason=reason or "",
+                    project_id=project_id or "main-workspace",
+                    organization_id=organization_id,
                 )
             logger.info(f"[NEO4J] Stored decision: {decision_id}")
             return decision_id
@@ -75,7 +89,7 @@ def neo_store(
                 raise
 
 
-def neo_impact_search(topic: str, limit: int = 10, source_filter: str = None) -> list:
+def neo_impact_search(topic: str, limit: int = 10, source_filter: str = None, project_id: str | None = None) -> list:
     """Find all decisions related to a topic and their downstream impacts."""
     with _driver.session() as session:
         result = session.run(
@@ -88,7 +102,8 @@ def neo_impact_search(topic: str, limit: int = 10, source_filter: str = None) ->
                  collect(DISTINCT r.text) as reasons,
                  collect(DISTINCT p.name) as people,
                  collect(DISTINCT a.text) as alternatives
-            WHERE ($source_filter IS NULL OR d.source = $source_filter)
+            WHERE ($project_id IS NULL OR d.project_id = $project_id)
+              AND ($source_filter IS NULL OR d.source = $source_filter)
               AND any(word IN split(toLower($topic), ' ')
                 WHERE toLower(d.action)  CONTAINS word
                    OR toLower(d.subject) CONTAINS word
@@ -99,12 +114,12 @@ def neo_impact_search(topic: str, limit: int = 10, source_filter: str = None) ->
                    reasons, people, alternatives
             LIMIT $limit
             """,
-            topic=topic, limit=limit, source_filter=source_filter,
+            topic=topic, limit=limit, source_filter=source_filter, project_id=project_id,
         )
         return result.data()
 
 
-def neo_search(query: str, limit: int = 5, source_filter: str = None) -> list:
+def neo_search(query: str, limit: int = 5, source_filter: str = None, project_id: str | None = None) -> list:
     with _driver.session() as session:
         result = session.run(
             """
@@ -116,7 +131,8 @@ def neo_search(query: str, limit: int = 5, source_filter: str = None) -> list:
                  collect(DISTINCT r.text) as reasons,
                  collect(DISTINCT p.name) as people,
                  collect(DISTINCT a.text) as alternatives
-            WHERE ($source_filter IS NULL OR d.source = $source_filter)
+            WHERE ($project_id IS NULL OR d.project_id = $project_id)
+              AND ($source_filter IS NULL OR d.source = $source_filter)
               AND any(word IN split(toLower($q), ' ')
                 WHERE toLower(d.action)  CONTAINS word
                    OR toLower(d.subject) CONTAINS word
@@ -128,6 +144,6 @@ def neo_search(query: str, limit: int = 5, source_filter: str = None) -> list:
                    reasons, people, alternatives
             LIMIT $limit
             """,
-            q=query, limit=limit, source_filter=source_filter,
+            q=query, limit=limit, source_filter=source_filter, project_id=project_id,
         )
         return result.data()

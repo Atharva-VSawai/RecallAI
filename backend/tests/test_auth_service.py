@@ -30,7 +30,7 @@ def test_hs256_tokens_use_auth_server_not_shared_secret():
 
 
 def test_unknown_signing_algorithm_is_rejected():
-    service = AuthService(FakeRepository())
+    service = AuthService()
     with patch("application.services.auth_service.settings.supabase_url", "https://project.supabase.co"), \
          patch("application.services.auth_service.jwt.get_unverified_header", return_value={"alg": "none"}):
         with pytest.raises(AuthenticationError, match="Unsupported JWT signing algorithm"):

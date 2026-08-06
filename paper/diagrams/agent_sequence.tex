@@ -1,0 +1,20 @@
+\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=7mm,
+ s/.style={draw,rounded corners,align=center,minimum width=18mm,minimum height=6mm,fill=blue!8},
+ a/.style={draw,rounded corners,align=center,minimum width=22mm,minimum height=6mm,fill=orange!12},
+ d/.style={->,semithick}]
+\node[s] (u) {User};
+\node[a,right=of u] (r) {Router};
+\node[a,right=of r] (ag) {Query / Impact agent};
+\node[s,right=of ag] (t) {Graph + vector tools};
+\node[s,right=of t] (db) {Neo4j / Chroma};
+\node[s,below=of ag] (g) {Generator};
+\node[s,below=of t] (tr) {Source trace};
+\draw[d] (u)--(r) node[midway,above]{question};
+\draw[d] (r)--(ag) node[midway,above]{label};
+\draw[d] (ag)--(t) node[midway,above]{calls};
+\draw[d] (t)--(db);
+\draw[d] (db)--(t) node[midway,below]{evidence};
+\draw[d] (ag)--(g) node[midway,left]{context};
+\draw[d] (t)--(tr);
+\draw[d] (g)--(u) node[midway,below]{answer};
+\end{tikzpicture}

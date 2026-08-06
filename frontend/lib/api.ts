@@ -368,3 +368,44 @@ export async function deleteFile(source: string): Promise<boolean> {
     return false;
   }
 }
+
+export interface TeamsStatus { connected: boolean; provider: string; status?: string; email?: string | null; updated_at?: number | null; subscription_configured?: boolean; mock_transcripts_enabled?: boolean; }
+export interface TeamsMeeting { id: string; title: string; source: string; start?: string; end?: string; synced_at?: number; }
+export interface TeamsSyncResponse { status: string; count: number; mocked_count: number; meetings: unknown[]; transcript_access: "available" | "mock" | "requires_admin_consent"; message?: string; }
+
+export async function getTeamsStatus(): Promise<TeamsStatus> {
+  const res = await authenticatedFetch(`${BASE}/integrations/teams/status`, { cache: "no-store" });
+  if (!res.ok) throw await readApiError(res, "Failed to load Teams status");
+  return res.json();
+}
+
+export async function connectTeams(): Promise<void> {
+  const res = await authenticatedFetch(`${BASE}/integrations/teams/connect`);
+  if (!res.ok) throw await readApiError(res, "Could not start Teams connection");
+  const data = await res.json();
+  window.location.href = data.url;
+}
+
+export async function disconnectTeams(): Promise<void> {
+  const res = await authenticatedFetch(`${BASE}/integrations/teams/connection`, { method: "DELETE" });
+  if (!res.ok) throw await readApiError(res, "Could not disconnect Teams");
+}
+
+export async function syncTeams(): Promise<TeamsSyncResponse> {
+  const res = await authenticatedFetch(`${BASE}/integrations/teams/sync`, { method: "POST", headers: await authenticatedHeaders({ "x-llm-provider": getLlmProvider() }) });
+  if (!res.ok) throw await readApiError(res, "Teams sync failed");
+  return res.json();
+}
+
+export async function listTeamsMeetings(): Promise<TeamsMeeting[]> {
+  const res = await authenticatedFetch(`${BASE}/integrations/teams/meetings`, { cache: "no-store" });
+  if (!res.ok) throw await readApiError(res, "Failed to load Teams meetings");
+  const data = await res.json();
+  return data.meetings ?? [];
+}
+
+export async function getTeamsMeeting(id: string): Promise<TeamsMeeting & { knowledge: Record<string, unknown>[]; participants: string[] }> {
+  const res = await authenticatedFetch(`${BASE}/integrations/teams/meetings/${encodeURIComponent(id)}`, { cache: "no-store" });
+  if (!res.ok) throw await readApiError(res, "Failed to load meeting details");
+  return res.json();
+}

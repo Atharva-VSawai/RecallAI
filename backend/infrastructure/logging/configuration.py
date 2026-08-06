@@ -11,7 +11,7 @@ class JsonFormatter(logging.Formatter):
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "request_id": request_id_context.get(),
+            "request_id": request_id_context.get(),  
             "message": record.getMessage(),
         })
 

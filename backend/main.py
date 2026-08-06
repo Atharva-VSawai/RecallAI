@@ -5,10 +5,26 @@ from api.router import api_router
 from core.config import settings
 from infrastructure.logging import configure_logging
 from middleware.request_context import RequestContextMiddleware
+import asyncio
 
 
 configure_logging()
 app = FastAPI(title="Recall.AI API", version="1.0.0")
+
+async def _teams_subscription_renewal_loop():
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            from application.services.teams_service import TeamsService
+            await asyncio.to_thread(TeamsService().renew_subscriptions)
+        except Exception:
+            # Renewal is best-effort; the next cycle or manual endpoint can retry.
+            pass
+
+@app.on_event("startup")
+async def start_background_tasks():
+    if settings.graph_webhook_url or settings.teams_webhook_url:
+        asyncio.create_task(_teams_subscription_renewal_loop())
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,

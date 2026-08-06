@@ -1,0 +1,3 @@
+\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=7mm, b/.style={draw,rounded corners,align=center,minimum width=24mm,minimum height=7mm,fill=green!10}, a/.style={->,thick}]
+\node[b](src){Migration artifact};\node[b,right=of src](kg){Decision graph};\node[b,right=of kg](q){Why / what-if query};\node[b,right=of q](ans){Answer + sources};\draw[a](src)--(kg)--(q)--(ans);
+\end{tikzpicture}

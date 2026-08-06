@@ -1,0 +1,3 @@
+\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=7mm, b/.style={draw,rounded corners,align=center,minimum width=24mm,minimum height=7mm,fill=orange!12}, a/.style={->,thick}]
+\node[b](x){Raw content};\node[b,right=of x](c){Paragraph chunks};\node[b,right=of c](llm){Structured LLM output};\node[b,right=of llm](val){Pydantic validation};\node[b,right=of val](p){Projection};\draw[a](x)--(c)--(llm)--(val)--(p);
+\end{tikzpicture}

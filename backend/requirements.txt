@@ -26,8 +26,9 @@ cohere
 
 # Slack
 slack-sdk
+httpx
+cryptography
 
 # Audio transcription
 groq
 pytest
-httpx

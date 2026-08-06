@@ -1,0 +1,3 @@
+\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=7mm, b/.style={draw,rounded corners,align=center,minimum width=25mm,minimum height=7mm,fill=blue!8}, a/.style={->,thick}]
+\node[b](web){Browser};\node[b,right=of web](api){FastAPI service};\node[b,right=of api](db){Neo4j / Chroma};\node[b,below=of api](ext){Groq / Cohere / Slack / Teams};\draw[a](web)--(api)--(db);\draw[a](api)--(ext);
+\end{tikzpicture}

@@ -1,0 +1,31 @@
+\begin{tikzpicture}[font=\footnotesize,>=Latex,node distance=5mm and 8mm,
+ box/.style={draw,rounded corners,align=center,minimum height=7mm,minimum width=21mm,fill=blue!7},
+ store/.style={draw,rounded corners,align=center,minimum height=8mm,minimum width=24mm,fill=green!10},
+ agent/.style={draw,rounded corners,align=center,minimum height=8mm,minimum width=25mm,fill=orange!14},
+ line/.style={->,thick}]
+\node[box] (ui) {Next.js / React\\query, graph, files, teams};
+\node[box,right=of ui] (api) {FastAPI\\routes + services};
+\node[box,right=of api] (ing) {Ingestion\\PDF / image / Excel / audio};
+\node[store,below=of ing] (neo) {Neo4j\\decisions + relations};
+\node[store,left=of neo] (chroma) {Chroma\\raw chunks + embeddings};
+\node[agent,left=of chroma] (router) {Router\\QUERY / IMPACT};
+\node[agent,below=of router] (q) {Query agent\\graph + raw tools};
+\node[agent,below=of chroma] (i) {Impact agent\\related decisions + people};
+\node[box,right=of neo] (llm) {Groq / Ollama\\structured extraction + generation};
+\node[box,below=of api] (auth) {Supabase\\auth, projects, teams};
+\draw[line] (ui)--(api);
+\draw[line] (api)--(ing);
+\draw[line] (api)--(router);
+\draw[line] (ing)--(neo);
+\draw[line] (ing)--(chroma);
+\draw[line] (router)--(q);
+\draw[line] (router)--(i);
+\draw[line] (q)--(neo);
+\draw[line] (q)--(chroma);
+\draw[line] (i)--(neo);
+\draw[line] (i)--(chroma);
+\draw[line] (ing)--(llm);
+\draw[line] (q)--(llm);
+\draw[line] (i)--(llm);
+\draw[dashed,->] (api)--(auth);
+\end{tikzpicture}

@@ -9,7 +9,23 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: CORS_ORIGINS
-        value: https://your-vercel-app-url.vercel.app # TODO: Update this after Vercel deployment
+        value: https://recall-ai-86lp-omega.vercel.app
+      - key: FRONTEND_URL
+        value: https://recall-ai-86lp-omega.vercel.app
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_REDIRECT_URI
+        value: https://my-backend-bdxc.onrender.com/integrations/teams/oauth/callback
+      - key: TEAMS_TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: GRAPH_WEBHOOK_URL
+        value: https://my-backend-bdxc.onrender.com/integrations/teams/notifications
+      - key: TEAMS_WEBHOOK_CLIENT_STATE
+        sync: false
+      - key: MOCK_TEAMS_TRANSCRIPTS
+        value: "false"
       - key: LOG_LEVEL
         value: INFO
       - key: SUPABASE_URL

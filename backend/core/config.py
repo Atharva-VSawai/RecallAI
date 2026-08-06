@@ -7,6 +7,18 @@ class Settings(BaseSettings):
     neo4j_username: str = ""
     neo4j_password: str = ""
     slack_bot_token: str = ""
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+    microsoft_tenant_id: str = "common"
+    microsoft_redirect_uri: str = ""
+    teams_token_encryption_key: str = ""
+    graph_webhook_url: str = ""
+    # Backward-compatible alias for earlier local configuration.
+    teams_webhook_url: str = ""
+    teams_webhook_client_state: str = ""
+    frontend_url: str = ""
+    mock_teams_transcripts: bool = False
+    mock_teams_transcript: str = "WEBVTT\\n\\n00:00.000 --> 00:05.000\\nAlex: We will ship the reporting API next Friday.\\n\\n00:05.000 --> 00:10.000\\nPriya: Alex owns the implementation and the risk is the migration timeline."
     cohere_api_key: str = ""
     chroma_tenant: str = ""
     chroma_api_key: str = ""

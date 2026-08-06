@@ -27,11 +27,29 @@ class ExtractionResult(BaseModel):
     items: List[DecisionItem]
 
 
+class MeetingKnowledgeItem(BaseModel):
+    category: str = Field(description="decision, action_item, risk, requirement, participant, deadline, or technology")
+    title: str
+    details: str = ""
+    people: List[str] = Field(default_factory=list)
+    deadline: Optional[str] = None
+    technology: Optional[str] = None
+
+
+class MeetingExtractionResult(BaseModel):
+    items: List[MeetingKnowledgeItem]
+
+
 PROMPT = ChatPromptTemplate.from_messages([
     ("system", """You are an organizational memory extractor.
 Extract ALL decisions, reasoning, and key information from the content.
 Follow the JSON schema perfectly."""),
     ("human", "Content:\n{content}"),
+])
+
+MEETING_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """You are an organizational meeting knowledge extractor. Extract every useful structured item from the meeting transcript. Use category values only: decision, action_item, risk, requirement, participant, deadline, technology. Keep details faithful to the transcript and return the JSON schema exactly."""),
+    ("human", "Meeting transcript:\n{content}"),
 ])
 
 
@@ -109,3 +127,33 @@ def run_ingestion(file_bytes: bytes, filename: str, source: str = "document", pr
 
 def run_ingestion_from_text(raw_text: str, source: str, provider: str = "groq", store_graph: bool = True, store_vector: bool = True, project_id: str | None = None, organization_id: str = "default") -> dict:
     return _structure_and_store(raw_text, source, provider, store_graph, store_vector, project_id, organization_id)
+
+
+def run_meeting_ingestion_from_text(raw_text: str, source: str, meeting_id: str, provider: str = "groq", project_id: str | None = None, organization_id: str = "default", metadata: dict | None = None) -> dict:
+    """Use the same chunking and vector path as all other sources, with richer meeting entities."""
+    from db.chroma import chroma_store
+    from db.neo import neo_store_meeting_knowledge
+
+    chroma_store(content=raw_text, source=source, metadata={"meeting_id": meeting_id, **(metadata or {})}, project_id=project_id)
+    llm = get_llm(provider)
+    chain = MEETING_PROMPT | llm.with_structured_output(MeetingExtractionResult)
+    max_len = 1000 if provider == "ollama" else 100000
+    chunks, current = [], ""
+    for paragraph in raw_text.split("\n"):
+        if len(current) + len(paragraph) > max_len and current:
+            chunks.append(current.strip())
+            current = paragraph + "\n"
+        else:
+            current += paragraph + "\n"
+    if current.strip(): chunks.append(current.strip())
+    items = []
+    for chunk in chunks:
+        if not chunk: continue
+        try:
+            result = chain.invoke({"content": chunk})
+            items.extend(item.model_dump() for item in (result.items if result else []))
+        except Exception as exc:
+            logger.error("Meeting extraction failed: %s", exc)
+    for item in items:
+        neo_store_meeting_knowledge(meeting_id=meeting_id, source=source, item=item, project_id=project_id, organization_id=organization_id)
+    return {"ingested": len(items), "items": items, "raw_text": raw_text}

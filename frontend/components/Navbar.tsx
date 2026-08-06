@@ -24,6 +24,7 @@ import {
   Plus,
   Loader2,
   ChevronsUpDown,
+  Video,
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
 import { checkHealth, createProject } from "@/lib/api";
@@ -46,6 +47,7 @@ const links = [
   { href: "/query", label: "Query", icon: Search },
   { href: "/graph", label: "Graph", icon: Network },
   { href: "/activity", label: "Activity", icon: Activity },
+  { href: "/teams", label: "Teams", icon: Video },
 ];
 
 function MagneticLink({

@@ -15,7 +15,7 @@ def connect(user: AuthenticatedUser = Depends(get_current_user), project: Projec
 
 @router.get("/oauth/callback")
 def oauth_callback(code: str | None = Query(default=None), state: str | None = Query(default=None), error: str | None = Query(default=None), error_description: str | None = Query(default=None)):
-    frontend_url = settings.frontend_url.rstrip("/")
+    frontend_url = TeamsService.frontend_url()
     if error:
         detail = error_description or error
         return RedirectResponse(url=f"{frontend_url}/teams?error={quote(detail)}")

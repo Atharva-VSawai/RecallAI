@@ -21,6 +21,13 @@ class TeamsService:
     def __init__(self):
         self.adapter = MicrosoftTeamsAdapter()
 
+    @staticmethod
+    def frontend_url() -> str:
+        configured = settings.frontend_url.strip()
+        if configured:
+            return configured.rstrip("/")
+        return next((origin.strip().rstrip("/") for origin in settings.cors_origins.split(",") if origin.strip()), "")
+
     def _state(self, project: ProjectContext, user: AuthenticatedUser) -> str:
         payload = json.dumps({"project_id": project.project_id, "organization_id": project.organization_id, "user_id": user.user_id, "exp": int(time.time()) + 600}, separators=(",", ":")).encode()
         encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
@@ -42,8 +49,16 @@ class TeamsService:
         return payload
 
     def connect_url(self, project: ProjectContext, user: AuthenticatedUser) -> str:
-        if not settings.microsoft_client_id or not settings.microsoft_client_secret or not settings.microsoft_redirect_uri or not settings.frontend_url:
-            raise ConflictError("Microsoft OAuth is not fully configured")
+        missing = [
+            name for name, value in (
+                ("MICROSOFT_CLIENT_ID", settings.microsoft_client_id),
+                ("MICROSOFT_CLIENT_SECRET", settings.microsoft_client_secret),
+                ("MICROSOFT_REDIRECT_URI", settings.microsoft_redirect_uri),
+                ("FRONTEND_URL or CORS_ORIGINS", TeamsService.frontend_url()),
+            ) if not value
+        ]
+        if missing:
+            raise ConflictError(f"Microsoft OAuth is not fully configured. Missing: {', '.join(missing)}")
         if not settings.teams_token_encryption_key or settings.teams_token_encryption_key == "change-me-in-production":
             raise ConflictError("TEAMS_TOKEN_ENCRYPTION_KEY is not configured")
         return self.adapter.authorization_url(self._state(project, user))

@@ -117,3 +117,9 @@ def test_sync_returns_clear_admin_consent_message_on_transcript_403(monkeypatch)
     assert result["status"] == "partial"
     assert result["transcript_access"] == "requires_admin_consent"
     assert result["message"] == "Transcript access requires Microsoft Entra administrator consent."
+
+
+def test_frontend_url_falls_back_to_cors_origin(monkeypatch):
+    monkeypatch.setattr(settings, "frontend_url", "")
+    monkeypatch.setattr(settings, "cors_origins", "https://recall-ai-86lp-omega.vercel.app")
+    assert TeamsService.frontend_url() == "https://recall-ai-86lp-omega.vercel.app"

@@ -1,17 +1,13 @@
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 import uuid
-from neo4j import GraphDatabase
-from core.config import settings
+from db.neo import _driver
 
 class ActivityStore:
     """Database-backed activity store with user-specific tracking."""
     
     def __init__(self):
-        self._driver = GraphDatabase.driver(
-            settings.neo4j_uri,
-            auth=(settings.neo4j_username, settings.neo4j_password),
-        )
+        self._driver = _driver
     
     def add_event(self, event_type: str, title: str, description: str, source: str = None, user_id: str = None, project_id: str = None):
         """Add a new activity event for a specific user."""

@@ -6,11 +6,12 @@ from .base import (
     ExternalServiceError,
     IngestionError,
     NotFoundError,
+    RateLimitError,
     StorageError,
     ValidationError,
 )
 
 __all__ = [
     "DomainError", "ValidationError", "AuthenticationError", "AuthorizationError",
-    "NotFoundError", "ConflictError", "StorageError", "ExternalServiceError", "IngestionError",
+    "NotFoundError", "ConflictError", "RateLimitError", "StorageError", "ExternalServiceError", "IngestionError",
 ]

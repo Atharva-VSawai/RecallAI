@@ -8,16 +8,18 @@ class TopicInput(BaseModel):
     topic: str
     source_filter: Optional[str] = None
     project_id: Optional[str] = None
+    organization_id: Optional[str] = None
 
 
 class PersonInput(BaseModel):
     person_name: str
     source_filter: Optional[str] = None
     project_id: Optional[str] = None
+    organization_id: Optional[str] = None
 
 
-def _find_related_decisions(topic: str, source_filter: Optional[str] = None, project_id: Optional[str] = None) -> str:
-    records = neo_impact_search(topic, source_filter=source_filter, project_id=project_id)
+def _find_related_decisions(topic: str, source_filter: Optional[str] = None, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> str:
+    records = neo_impact_search(topic, source_filter=source_filter, project_id=project_id, organization_id=organization_id)
     if not records:
         return f"No related decisions found for: {topic}"
     output = []
@@ -34,8 +36,8 @@ def _find_related_decisions(topic: str, source_filter: Optional[str] = None, pro
     return "\n---\n".join(output)
 
 
-def _find_decisions_by_person(person_name: str, source_filter: Optional[str] = None, project_id: Optional[str] = None) -> str:
-    records = _neo_search(person_name, source_filter=source_filter, project_id=project_id)
+def _find_decisions_by_person(person_name: str, source_filter: Optional[str] = None, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> str:
+    records = _neo_search(person_name, source_filter=source_filter, project_id=project_id, organization_id=organization_id)
     if not records:
         return f"No decisions found involving: {person_name}"
     output = []

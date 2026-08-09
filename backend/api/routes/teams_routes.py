@@ -5,6 +5,7 @@ from application.services.auth_service import AuthenticatedUser
 from application.services.project_service import ProjectContext
 from application.services.teams_service import TeamsService
 from api.dependencies import get_current_user, get_project_context, require_project_permission
+from api.rate_limit import TEAMS_SYNC_LIMIT, require_rate_limit
 from core.config import settings
 
 router = APIRouter(prefix="/integrations/teams", tags=["microsoft-teams"])
@@ -37,7 +38,7 @@ def meetings(project: ProjectContext = Depends(require_project_permission("knowl
 def meeting(meeting_id: str, project: ProjectContext = Depends(require_project_permission("knowledge:read"))): return TeamsService().meeting(project, meeting_id)
 
 @router.post("/sync")
-def sync(user: AuthenticatedUser = Depends(get_current_user), project: ProjectContext = Depends(require_project_permission("knowledge:write"))): return TeamsService().sync(project, user)
+def sync(user: AuthenticatedUser = Depends(get_current_user), project: ProjectContext = Depends(require_project_permission("knowledge:write")), _: None = Depends(require_rate_limit("teams-sync", TEAMS_SYNC_LIMIT))): return TeamsService().sync(project, user)
 
 @router.post("/notifications")
 def notifications(background_tasks: BackgroundTasks, payload: dict | None = None, validationToken: str | None = Query(default=None)):

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from api.dependencies import get_current_user, get_project_context
 from application.services.auth_service import AuthenticatedUser
 from application.services.project_service import ProjectContext, ProjectService
-from schemas.requests import CreateProjectRequest
+from schemas.requests import CreateProjectRequest, UpdateProjectRequest
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -26,3 +26,8 @@ def create_project(request: CreateProjectRequest, user: AuthenticatedUser = Depe
 @router.delete("/{project_id}")
 def delete_project(project_id: str, user: AuthenticatedUser = Depends(get_current_user)):
     return {"status": "success", **ProjectService().delete_project(project_id, user)}
+
+
+@router.patch("/{project_id}")
+def update_project(project_id: str, request: UpdateProjectRequest, user: AuthenticatedUser = Depends(get_current_user)):
+    return {"status": "success", "project": ProjectService().update_project(project_id, request.name, user)}

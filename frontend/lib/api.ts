@@ -146,6 +146,17 @@ export async function createProject(name: string): Promise<Project> {
   return data.project;
 }
 
+export async function updateProject(projectId: string, name: string): Promise<Project> {
+  const res = await authenticatedFetch(`${BASE}/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: await authenticatedHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await readApiError(res, "Failed to update workspace");
+  const data = await res.json();
+  return data.project;
+}
+
 export async function deleteProject(projectId: string): Promise<void> {
   const res = await authenticatedFetch(`${BASE}/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",
@@ -292,12 +303,23 @@ export async function checkHealth(): Promise<boolean> {
 }
 
 export async function listFiles(): Promise<FileMetadata[]> {
-  let res: Response;
+  let res: Response | null = null;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
   try {
     // Let authenticatedFetch handle the Authorization header internally —
     // passing headers here would call getValidSession() twice.
     res = await authenticatedFetch(`${BASE}/files/list`, { cache: 'no-store' });
+    if (![502, 503, 504].includes(res.status) || attempt === 3) break;
+    await new Promise((resolve) => window.setTimeout(resolve, 300 * 2 ** (attempt - 1)));
   } catch (err) {
+    lastError = err;
+    if (attempt === 3) break;
+    await new Promise((resolve) => window.setTimeout(resolve, 300 * 2 ** (attempt - 1)));
+  }
+  }
+  if (!res) {
+    const err = lastError;
     // Re-throw auth/session errors with a recognisable prefix so
     // callers can tell them apart from genuine network failures.
     const msg = err instanceof Error ? err.message : String(err);
@@ -333,12 +355,53 @@ export interface GraphEdge {
 export interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  pagination: {
+    limit: number;
+    offset: number;
+    returned_decisions: number;
+    total_decisions: number;
+    has_more: boolean;
+  };
 }
 
-export async function getGraphData(): Promise<GraphData> {
-  const res = await authenticatedFetch(`${BASE}/graph/data`, { cache: "no-store" });
-  if (!res.ok) throw await readApiError(res, "Failed to fetch graph data");
-  return res.json();
+let graphRequest: Promise<GraphData> | null = null;
+
+export async function getGraphData(offset = 0, limit = 100): Promise<GraphData> {
+  // This also deduplicates React Strict Mode's development-only effect replay
+  // and multiple mounts during navigation.
+  if (graphRequest) return graphRequest;
+  graphRequest = (async () => {
+    let delay = 400;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 15_000);
+      try {
+        const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+        const res = await authenticatedFetch(`${BASE}/graph/data?${params}`, { cache: "no-store", signal: controller.signal });
+        if (res.ok) return res.json();
+        const retryable = [429, 502, 503, 504].includes(res.status);
+        if (!retryable || attempt === 4) throw await readApiError(res, "Failed to fetch graph data");
+        console.warn(`Graph request transient failure (HTTP ${res.status}); retrying in ${delay}ms`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const statusMatch = message.match(/HTTP (\d{3})/);
+        const status = statusMatch ? Number(statusMatch[1]) : null;
+        const retryable = status === null || [429, 502, 503, 504].includes(status);
+        if (attempt === 4 || !retryable || message.toLowerCase().includes("session")) throw error;
+        console.warn(`Graph request failed; retrying in ${delay}ms`, error);
+      } finally {
+        window.clearTimeout(timeout);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+      delay *= 2;
+    }
+    throw new Error("Failed to fetch graph data");
+  })();
+  try {
+    return await graphRequest;
+  } finally {
+    graphRequest = null;
+  }
 }
 
 export async function checkFileBySource(source: string): Promise<{ exists: boolean; file?: FileMetadata }> {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Search, Calendar, CheckCircle2, Loader2, FileSpreadsheet, Music, Film, Image as ImageIcon, MessageSquare, File, RefreshCw, Trash2 } from "lucide-react";
+import { FileText, Search, Calendar, CheckCircle2, Loader2, FileSpreadsheet, Music, Film, Image as ImageIcon, MessageSquare, File, RefreshCw, Trash2, type LucideIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { listFiles, deleteFile, FileMetadata } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
@@ -84,9 +84,9 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
       if (isSessionError) {
         setError('Your session has expired. Please sign in again.');
       } else if (isOffline) {
-        setError('Cannot reach the backend. Make sure the server is running on port 8000.');
+        setError('We couldn’t reach your knowledge sources. Please try again.');
       } else {
-        setError(msg);
+        setError('We couldn’t load your knowledge sources. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -109,7 +109,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
         onSelectFile("", "");
       }
     } else {
-      alert("Failed to delete file. Check console for details.");
+      setError("We couldn’t delete this source. Please try again.");
     }
   };
 
@@ -120,7 +120,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
   );
 
   const getFileIcon = (type: string) => {
-    const iconMap: Record<string, any> = {
+    const iconMap: Record<string, LucideIcon> = {
       pdf: FileText,
       xlsx: FileSpreadsheet,
       xls: FileSpreadsheet,
@@ -302,26 +302,26 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
       <Dialog open={!!fileToDelete} onOpenChange={(open) => !open && setFileToDelete(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-red-600">Delete File Permanently</DialogTitle>
+            <DialogTitle className="text-danger">Delete source permanently</DialogTitle>
             <DialogDescription>
               This action cannot be undone. This will permanently delete <strong>{fileToDelete?.filename}</strong> and all decisions, alternatives, people, and extracted metadata associated with it from the knowledge graph and Chroma DB.
             </DialogDescription>
           </DialogHeader>
           <div className="py-4">
-            <p className="text-sm font-medium mb-2 text-gray-900">
-              Please type <strong className="text-red-600 font-bold select-none">DELETE</strong> to confirm.
+            <p className="text-sm font-medium mb-2 text-foreground">
+              Please type <strong className="text-danger font-bold select-none">DELETE</strong> to confirm.
             </p>
             <Input
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
               placeholder="Type DELETE"
-              className="border-red-200 focus:border-red-500"
+              className="border-danger/40 focus:border-danger"
             />
           </div>
           <DialogFooter>
             <button
               onClick={() => setFileToDelete(null)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-medium text-foreground-muted hover:bg-surface-elevated hover:text-foreground rounded-md transition-colors"
               disabled={isDeleting}
             >
               Cancel

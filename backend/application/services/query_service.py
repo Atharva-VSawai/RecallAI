@@ -8,7 +8,15 @@ class QueryService:
     def run(self, question: str, source_filter: str | None, user: AuthenticatedUser, provider: str, project: ProjectContext) -> dict:
         try:
             from agents.router import run
-            result = run(question, source_filter=source_filter, provider=provider, project_id=project.project_id)
+            from db.chroma import query_embedding_cache
+            with query_embedding_cache():
+                result = run(
+                    question,
+                    source_filter=source_filter,
+                    provider=provider,
+                    project_id=project.project_id,
+                    organization_id=project.organization_id,
+                )
         except Exception as exc:
             raise ExternalServiceError("Knowledge query could not be completed") from exc
         agent_type = result["agent_used"].lower()

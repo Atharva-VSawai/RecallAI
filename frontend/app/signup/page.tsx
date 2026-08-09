@@ -72,7 +72,7 @@ export default function SignupPage() {
   const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"][passwordStrength];
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center px-6 py-24 overflow-hidden">
+    <div className="relative -mt-14 min-h-screen flex items-center justify-center px-6 py-24 overflow-hidden md:-ml-[var(--sidebar-width)]">
       {/* Ambient orbs */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div className="orb orb-violet w-[500px] h-[500px] -top-48 -right-32 animate-float-slow" />

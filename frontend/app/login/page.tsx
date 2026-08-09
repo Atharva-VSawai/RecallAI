@@ -40,7 +40,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative min-h-screen flex items-center justify-center px-6 py-24 overflow-hidden">
+    <div className="relative -mt-14 min-h-screen flex items-center justify-center px-6 py-24 overflow-hidden md:-ml-[var(--sidebar-width)]">
       {/* Ambient orbs */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div className="orb orb-cyan w-[500px] h-[500px] -top-48 -left-32 animate-float-slow" />

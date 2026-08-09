@@ -27,6 +27,10 @@ class ConflictError(DomainError):
     code, status_code = "CONFLICT", 409
 
 
+class RateLimitError(DomainError):
+    code, status_code = "RATE_LIMITED", 429
+
+
 class StorageError(DomainError):
     code, status_code = "STORAGE_ERROR", 503
 

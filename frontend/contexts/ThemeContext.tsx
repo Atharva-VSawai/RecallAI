@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 
 type Theme = "dark" | "light";
 
@@ -15,26 +15,12 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 const STORAGE_KEY = "recallai-theme";
 
+function applyTheme(next: Theme) {
+  document.documentElement.classList.toggle("light", next === "light");
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("dark");
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const stored = typeof window !== "undefined" ? (localStorage.getItem(STORAGE_KEY) as Theme | null) : null;
-    const initial = stored ?? "dark";
-    setThemeState(initial);
-    applyTheme(initial);
-  }, []);
-
-  const applyTheme = (next: Theme) => {
-    const root = document.documentElement;
-    if (next === "light") {
-      root.classList.add("light");
-    } else {
-      root.classList.remove("light");
-    }
-  };
+  const [theme, setThemeState] = useState<Theme>(() => typeof window === "undefined" ? "dark" : (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "dark");
 
   const setTheme = (next: Theme) => {
     setThemeState(next);

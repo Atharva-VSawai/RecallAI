@@ -11,7 +11,7 @@ interface AuthContextType {
   loading: boolean;
   projects: Project[];
   activeProject: Project | null;
-  refreshProjects: () => Promise<void>;
+  refreshProjects: (preferredProjectId?: string) => Promise<void>;
   setActiveProjectId: (projectId: string) => void;
   can: (permission: string) => boolean;
 }
@@ -28,7 +28,7 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
-const publicRoutes = ["/login", "/signup", "/forgot-password"];
+const publicRoutes = ["/", "/login", "/signup", "/forgot-password"];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -45,12 +45,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event("recallai:files-changed"));
   };
 
-  const refreshProjects = async () => {
+  const refreshProjects = async (preferredProjectId?: string) => {
     try {
       const data = uniqueProjects(await listProjects());
       setProjects(() => data);
       const storedId = localStorage.getItem("recallai_active_project_id");
-      const selected = data.find((project) => project.id === storedId) ?? data[0] ?? null;
+      const selected = data.find((project) => project.id === preferredProjectId) ?? data.find((project) => project.id === storedId) ?? data[0] ?? null;
       if (selected) localStorage.setItem("recallai_active_project_id", selected.id);
       setActiveProject(selected);
     } catch {

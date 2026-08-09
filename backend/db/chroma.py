@@ -1,5 +1,7 @@
 import logging
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 import chromadb
 from langchain_cohere import CohereEmbeddings
 from core.config import settings
@@ -18,6 +20,23 @@ _client = chromadb.CloudClient(
 )
 
 _collection = _client.get_or_create_collection(name="notes")
+_request_embedding_cache: ContextVar[dict[str, list[float]] | None] = ContextVar(
+    "request_embedding_cache", default=None,
+)
+
+
+@contextmanager
+def query_embedding_cache():
+    """Reuse identical query embeddings for one agent request only.
+
+    The cache is context-local, so vectors cannot leak between users or
+    requests and it is discarded even when an agent call raises.
+    """
+    token = _request_embedding_cache.set({})
+    try:
+        yield
+    finally:
+        _request_embedding_cache.reset(token)
 
 
 def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100) -> list[str]:
@@ -69,7 +88,14 @@ def chroma_store(content: str, source: str, metadata: dict = None, project_id: s
 
 
 def chroma_search(query: str, k: int = 4, source_filter: str = None, project_id: str | None = None) -> list:
-    embedding = _embeddings.embed_query(query)
+    cache = _request_embedding_cache.get()
+    cache_key = query.strip()
+    if cache is not None and cache_key in cache:
+        embedding = cache[cache_key]
+    else:
+        embedding = _embeddings.embed_query(query)
+        if cache is not None:
+            cache[cache_key] = embedding
     legacy_default_project = project_id == "main-workspace"
     where = _where_filter(
         project_id=None if legacy_default_project else project_id,

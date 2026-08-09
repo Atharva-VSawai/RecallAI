@@ -1,18 +1,113 @@
 import uuid
 import time
 import logging
+import re
+from threading import Lock
 from neo4j import GraphDatabase
+from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
 from core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_driver = GraphDatabase.driver(
-    settings.neo4j_uri,
-    auth=(settings.neo4j_username, settings.neo4j_password),
-    max_connection_lifetime=3600,
-    max_connection_pool_size=50,
-    connection_acquisition_timeout=120,
+_driver_instance = None
+_driver_lock = Lock()
+
+
+class _DriverProxy:
+    """Stable object used by legacy modules while the real driver is startup-owned."""
+    def _get(self):
+        return get_driver()
+
+    def session(self, *args, **kwargs):
+        return self._get().session(*args, **kwargs)
+
+    def verify_connectivity(self):
+        return self._get().verify_connectivity()
+
+    def close(self):
+        return close_driver()
+
+
+_driver = _DriverProxy()
+
+
+def init_driver():
+    global _driver_instance
+    with _driver_lock:
+        if _driver_instance is None:
+            logger.info("neo4j.driver.initializing uri=%s", settings.neo4j_uri)
+            _driver_instance = GraphDatabase.driver(
+                settings.neo4j_uri,
+                auth=(settings.neo4j_username, settings.neo4j_password),
+                max_connection_lifetime=1800,
+                max_connection_pool_size=50,
+                connection_acquisition_timeout=15,
+                connection_timeout=10,
+                liveness_check_timeout=30,
+            )
+    return _driver_instance
+
+
+def get_driver():
+    return _driver_instance or init_driver()
+
+
+def close_driver():
+    global _driver_instance
+    with _driver_lock:
+        if _driver_instance is not None:
+            logger.info("neo4j.driver.closing")
+            _driver_instance.close()
+            _driver_instance = None
+
+
+def execute_with_retry(operation, *, operation_name: str, max_attempts: int = 4):
+    """Run one complete session operation, retrying only transient Neo4j failures."""
+    delay = 0.25
+    transient_errors = (ServiceUnavailable, SessionExpired, TransientError)
+    for attempt in range(1, max_attempts + 1):
+        started = time.monotonic()
+        try:
+            logger.info("neo4j.query.start operation=%s attempt=%d", operation_name, attempt)
+            logger.info("neo4j.connection.acquire.start operation=%s attempt=%d", operation_name, attempt)
+            with get_driver().session() as session:
+                logger.info("neo4j.connection.acquire.success operation=%s attempt=%d", operation_name, attempt)
+                logger.info("neo4j.session.created operation=%s attempt=%d", operation_name, attempt)
+                result = operation(session)
+            logger.info("neo4j.query.success operation=%s attempt=%d duration_ms=%d", operation_name, attempt, (time.monotonic() - started) * 1000)
+            return result
+        except transient_errors as exc:
+            if attempt == max_attempts:
+                logger.exception("neo4j.query.failed operation=%s attempts=%d", operation_name, attempt)
+                raise
+            logger.warning("neo4j.query.retry operation=%s attempt=%d next_delay_s=%.2f error=%s", operation_name, attempt, delay, type(exc).__name__)
+            time.sleep(delay)
+            delay = min(delay * 2, 4.0)
+        except Exception:
+            logger.exception("neo4j.query.failed operation=%s attempt=%d", operation_name, attempt)
+            raise
+
+
+_FULLTEXT_INDEXES = (
+    "CREATE FULLTEXT INDEX decision_search IF NOT EXISTS FOR (d:Decision) ON EACH [d.action, d.subject, d.impact]",
+    "CREATE FULLTEXT INDEX meeting_knowledge_search IF NOT EXISTS FOR (k:MeetingKnowledge) ON EACH [k.title, k.details, k.category, k.technology]",
+    "CREATE FULLTEXT INDEX person_search IF NOT EXISTS FOR (p:Person) ON EACH [p.name]",
+    "CREATE FULLTEXT INDEX reason_search IF NOT EXISTS FOR (r:Reason) ON EACH [r.text]",
 )
+
+
+def ensure_search_indexes() -> None:
+    """Apply the idempotent Neo4j full-text migration at application startup."""
+    with get_driver().session() as session:
+        for statement in _FULLTEXT_INDEXES:
+            session.run(statement).consume()
+    logger.info("neo4j.fulltext_indexes.ready count=%d", len(_FULLTEXT_INDEXES))
+
+
+def _fulltext_query(value: str) -> str:
+    """Turn user text into a bounded, safe Lucene OR query."""
+    terms = re.findall(r"[\w-]+", value.lower(), flags=re.UNICODE)[:12]
+    return " OR ".join(f'"{term}"' for term in terms)
 
 
 def neo_store(
@@ -116,99 +211,89 @@ def neo_store_meeting_knowledge(meeting_id: str, source: str, item: dict, projec
     return knowledge_id
 
 
-def neo_impact_search(topic: str, limit: int = 10, source_filter: str = None, project_id: str | None = None) -> list:
-    """Find all decisions related to a topic and their downstream impacts."""
-    with _driver.session() as session:
-        result = session.run(
-            """
-            MATCH (d:Decision)
-            OPTIONAL MATCH (d)-[:BASED_ON]->(r:Reason)
-            OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person)
-            OPTIONAL MATCH (d)-[:ALTERNATIVE]->(a:Alternative)
-            WITH d,
-                 collect(DISTINCT r.text) as reasons,
-                 collect(DISTINCT p.name) as people,
-                 collect(DISTINCT a.text) as alternatives
-            WHERE ($project_id IS NULL OR d.project_id = $project_id)
-              AND ($source_filter IS NULL OR d.source = $source_filter)
-              AND any(word IN split(toLower($topic), ' ')
-                WHERE toLower(d.action)  CONTAINS word
-                   OR toLower(d.subject) CONTAINS word
-                   OR any(rr IN reasons WHERE toLower(rr) CONTAINS word)
-            )
-            RETURN d.id as id, d.action as decision, d.subject as topic,
-                   d.impact as impact, d.source as source,
-                   reasons, people, alternatives
-            LIMIT $limit
-            """,
-            topic=topic, limit=limit, source_filter=source_filter, project_id=project_id,
-        )
-        decisions = result.data()
-        knowledge = session.run(
-            """
-            MATCH (k:MeetingKnowledge)
-            OPTIONAL MATCH (k)-[:INVOLVES]->(p:Person)
-            WHERE ($project_id IS NULL OR k.project_id = $project_id)
-              AND ($source_filter IS NULL OR k.source = $source_filter)
-              AND any(word IN split(toLower($topic), ' ')
-                WHERE toLower(k.title) CONTAINS word
-                   OR toLower(k.details) CONTAINS word
-                   OR toLower(k.category) CONTAINS word
-                   OR toLower(coalesce(k.technology, '')) CONTAINS word)
-            RETURN k.id as id, k.title as decision, k.category as topic,
-                   k.details as impact, k.source as source, '' as timestamp,
-                   [] as reasons, collect(DISTINCT p.name) as people, [] as alternatives
-            LIMIT $limit
-            """,
-            topic=topic, limit=limit, source_filter=source_filter, project_id=project_id,
-        ).data()
-        return decisions + knowledge
+def _search_decision_fulltext(session, fulltext_query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None) -> list:
+    return session.run(
+        """
+        CALL () {
+            CALL db.index.fulltext.queryNodes('decision_search', $fulltext_query, {limit: $candidate_limit})
+            YIELD node, score
+            RETURN node AS d, score
+            UNION
+            CALL db.index.fulltext.queryNodes('person_search', $fulltext_query, {limit: $candidate_limit})
+            YIELD node AS person, score
+            MATCH (d:Decision)-[:MADE_BY]->(person)
+            RETURN d, score
+            UNION
+            CALL db.index.fulltext.queryNodes('reason_search', $fulltext_query, {limit: $candidate_limit})
+            YIELD node AS reason, score
+            MATCH (d:Decision)-[:BASED_ON]->(reason)
+            RETURN d, score
+        }
+        WITH d, max(score) AS score
+        WHERE ($project_id IS NULL OR d.project_id = $project_id)
+          AND ($organization_id IS NULL OR d.organization_id = $organization_id)
+          AND ($source_filter IS NULL OR d.source = $source_filter)
+        OPTIONAL MATCH (d)-[:BASED_ON]->(r:Reason)
+        OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person)
+        OPTIONAL MATCH (d)-[:ALTERNATIVE]->(a:Alternative)
+        WITH d, score,
+             collect(DISTINCT r.text) as reasons,
+             collect(DISTINCT p.name) as people,
+             collect(DISTINCT a.text) as alternatives
+        RETURN d.id as id, d.action as decision, d.subject as topic,
+               d.impact as impact, d.source as source, d.timestamp as timestamp,
+               reasons, people, alternatives
+        ORDER BY score DESC, d.timestamp DESC
+        LIMIT $limit
+        """,
+        fulltext_query=fulltext_query,
+        candidate_limit=max(limit * 10, 50),
+        limit=limit,
+        source_filter=source_filter,
+        project_id=project_id,
+        organization_id=organization_id,
+    ).data()
 
 
-def neo_search(query: str, limit: int = 5, source_filter: str = None, project_id: str | None = None) -> list:
+def _search_meeting_fulltext(session, fulltext_query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None) -> list:
+    return session.run(
+        """
+        CALL db.index.fulltext.queryNodes('meeting_knowledge_search', $fulltext_query, {limit: $candidate_limit})
+        YIELD node AS k, score
+        WHERE ($project_id IS NULL OR k.project_id = $project_id)
+          AND ($organization_id IS NULL OR k.organization_id = $organization_id)
+          AND ($source_filter IS NULL OR k.source = $source_filter)
+        OPTIONAL MATCH (k)-[:INVOLVES]->(p:Person)
+        RETURN k.id as id, k.title as decision, k.category as topic,
+               k.details as impact, k.source as source, '' as timestamp,
+               [] as reasons, collect(DISTINCT p.name) as people, [] as alternatives,
+               score
+        ORDER BY score DESC
+        LIMIT $limit
+        """,
+        fulltext_query=fulltext_query,
+        candidate_limit=max(limit * 10, 50),
+        limit=limit,
+        source_filter=source_filter,
+        project_id=project_id,
+        organization_id=organization_id,
+    ).data()
+
+
+def _fulltext_search(query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None) -> list:
+    lucene_query = _fulltext_query(query)
+    if not lucene_query:
+        return []
     with _driver.session() as session:
-        result = session.run(
-            """
-            MATCH (d:Decision)
-            OPTIONAL MATCH (d)-[:BASED_ON]->(r:Reason)
-            OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person)
-            OPTIONAL MATCH (d)-[:ALTERNATIVE]->(a:Alternative)
-            WITH d,
-                 collect(DISTINCT r.text) as reasons,
-                 collect(DISTINCT p.name) as people,
-                 collect(DISTINCT a.text) as alternatives
-            WHERE ($project_id IS NULL OR d.project_id = $project_id)
-              AND ($source_filter IS NULL OR d.source = $source_filter)
-              AND any(word IN split(toLower($q), ' ')
-                WHERE toLower(d.action)  CONTAINS word
-                   OR toLower(d.subject) CONTAINS word
-                   OR any(rr IN reasons WHERE toLower(rr) CONTAINS word)
-                   OR any(pp IN people  WHERE toLower(pp) CONTAINS word)
-            )
-            RETURN d.id as id, d.action as decision, d.subject as topic,
-                   d.impact as impact, d.source as source, d.timestamp as timestamp,
-                   reasons, people, alternatives
-            LIMIT $limit
-            """,
-            q=query, limit=limit, source_filter=source_filter, project_id=project_id,
-        )
-        decisions = result.data()
-        knowledge = session.run(
-            """
-            MATCH (k:MeetingKnowledge)
-            OPTIONAL MATCH (k)-[:INVOLVES]->(p:Person)
-            WHERE ($project_id IS NULL OR k.project_id = $project_id)
-              AND ($source_filter IS NULL OR k.source = $source_filter)
-              AND any(word IN split(toLower($q), ' ')
-                WHERE toLower(k.title) CONTAINS word
-                   OR toLower(k.details) CONTAINS word
-                   OR toLower(k.category) CONTAINS word
-                   OR toLower(coalesce(k.technology, '')) CONTAINS word)
-            RETURN k.id as id, k.title as decision, k.category as topic,
-                   k.details as impact, k.source as source, '' as timestamp,
-                   [] as reasons, collect(DISTINCT p.name) as people, [] as alternatives
-            LIMIT $limit
-            """,
-            q=query, limit=limit, source_filter=source_filter, project_id=project_id,
-        ).data()
-        return decisions + knowledge
+        decisions = _search_decision_fulltext(session, lucene_query, limit, source_filter, project_id, organization_id)
+        knowledge = _search_meeting_fulltext(session, lucene_query, limit, source_filter, project_id, organization_id)
+    return decisions + knowledge
+
+
+def neo_impact_search(topic: str, limit: int = 10, source_filter: str | None = None, project_id: str | None = None, organization_id: str | None = None) -> list:
+    """Find impact candidates via Neo4j full-text indexes, never a graph scan."""
+    return _fulltext_search(topic, limit, source_filter, project_id, organization_id)
+
+
+def neo_search(query: str, limit: int = 5, source_filter: str | None = None, project_id: str | None = None, organization_id: str | None = None) -> list:
+    return _fulltext_search(query, limit, source_filter, project_id, organization_id)

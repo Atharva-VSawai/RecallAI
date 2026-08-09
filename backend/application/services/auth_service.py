@@ -36,7 +36,7 @@ class AuthService:
         if not user_id:
             raise AuthenticationError("Access token does not identify a user")
         return AuthenticatedUser(
-            user_id=str(user_id), organization_id="default", role="USER",
+            user_id=str(user_id), organization_id=_organization_id(claims, str(user_id)), role="USER",
             email=str(claims.get("email") or f"{user_id}@supabase.local"),
         )
 
@@ -67,7 +67,7 @@ class AuthService:
         if not user_id:
             raise AuthenticationError("Supabase Auth returned no user identity")
         return AuthenticatedUser(
-            user_id=str(user_id), organization_id="default", role="USER",
+            user_id=str(user_id), organization_id=_organization_id(user, str(user_id)), role="USER",
             email=str(user.get("email") or f"{user_id}@supabase.local"),
         )
 
@@ -79,3 +79,23 @@ class AuthService:
 @lru_cache(maxsize=4)
 def _jwks_client(jwks_url: str) -> jwt.PyJWKClient:
     return jwt.PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=600)
+
+
+def _organization_id(identity: dict, user_id: str) -> str:
+    """Use an explicit Supabase workspace claim; otherwise isolate by user ID.
+
+    We deliberately do not infer tenancy from an email domain.  A deployment
+    that provisions organizations can set `app_metadata.organization_id` (or
+    `workspace_id`); development users receive a stable personal organization.
+    """
+    metadata_sources = (
+        identity,
+        identity.get("app_metadata") or {},
+        identity.get("user_metadata") or {},
+    )
+    for metadata in metadata_sources:
+        for field in ("organization_id", "org_id", "workspace_id"):
+            value = metadata.get(field)
+            if isinstance(value, str) and value.strip():
+                return f"org:{value.strip()}"
+    return f"user:{user_id}"

@@ -31,3 +31,7 @@ class CreateProjectRequest(BaseModel):
         if not value:
             raise ValueError("Project name cannot be blank")
         return value
+
+
+class UpdateProjectRequest(CreateProjectRequest):
+    pass

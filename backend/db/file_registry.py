@@ -1,13 +1,7 @@
 """File registry to track uploaded files and prevent duplicates."""
 import hashlib
 from datetime import datetime, timezone
-from neo4j import GraphDatabase
-from core.config import settings
-
-_driver = GraphDatabase.driver(
-    settings.neo4j_uri,
-    auth=(settings.neo4j_username, settings.neo4j_password),
-)
+from db.neo import _driver
 
 def _compute_hash(file_bytes: bytes) -> str:
     """Compute SHA256 hash of file content."""
@@ -154,6 +148,33 @@ def delete_file_by_source(source: str, project_id: str | None = None) -> dict:
         )
         deleted_decisions = decision_result.single()["deleted_decisions"]
 
+        knowledge_result = session.run(
+            """
+            MATCH (k:MeetingKnowledge {source: $source})
+            WHERE ($project_id IS NULL OR k.project_id = $project_id)
+            DETACH DELETE k
+            RETURN count(k) as deleted_knowledge
+            """,
+            source=source,
+            project_id=project_id,
+        )
+        deleted_knowledge = knowledge_result.single()["deleted_knowledge"]
+
+        # Person/Reason/Alternative nodes are shared by project and may be
+        # referenced by another source. Only remove nodes that became orphaned.
+        orphan_result = session.run(
+            """
+            MATCH (n)
+            WHERE ($project_id IS NULL OR n.project_id = $project_id)
+              AND (n:Person OR n:Reason OR n:Alternative)
+              AND NOT (n)--()
+            DETACH DELETE n
+            RETURN count(n) as deleted_orphans
+            """,
+            project_id=project_id,
+        )
+        deleted_orphans = orphan_result.single()["deleted_orphans"]
+
         # Then delete the File node itself
         file_result = session.run(
             """
@@ -169,5 +190,7 @@ def delete_file_by_source(source: str, project_id: str | None = None) -> dict:
 
         return {
             "deleted_decisions": deleted_decisions,
+            "deleted_knowledge": deleted_knowledge,
+            "deleted_orphans": deleted_orphans,
             "deleted_files": deleted_files
         }

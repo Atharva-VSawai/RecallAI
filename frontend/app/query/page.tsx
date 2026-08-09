@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { motion, AnimatePresence, useMotionValue, useSpring } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Send, Loader2, RotateCcw, ChevronDown, ChevronUp,
+  Send, Loader2, RotateCcw, ChevronDown,
   Upload, FileText, CheckCircle2, XCircle, X, MessageSquare,
-  Hash, Mic, FileSpreadsheet, Image as ImageIcon, Brain, FolderKanban, ShieldCheck,
+  Hash, Mic, FileSpreadsheet, Image as ImageIcon, Brain, ShieldCheck,
 } from "lucide-react";
 import {
   queryKnowledge, ingestFile, ingestSlack, ingestAudio,
@@ -15,6 +15,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import SourceCard from "@/components/SourceCard";
 import AgentBadge from "@/components/AgentBadge";
+import FileSelector from "@/components/FileSelector";
 import { validateFile, validateQuery, validateSlackChannel } from "@/lib/validation";
 
 // ─────────────────────────────────────────────────────────────
@@ -33,27 +34,6 @@ type IngestState = "idle" | "loading" | "success" | "error";
 // ─────────────────────────────────────────────────────────────
 // Mouse-tracking cursor glow hook
 // ─────────────────────────────────────────────────────────────
-function useMouseGlow(containerRef: React.RefObject<HTMLDivElement | null>) {
-  const mouseX = useMotionValue(0);
-  const mouseY = useMotionValue(0);
-  const springX = useSpring(mouseX, { stiffness: 120, damping: 22 });
-  const springY = useSpring(mouseY, { stiffness: 120, damping: 22 });
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const handleMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect();
-      mouseX.set(e.clientX - rect.left);
-      mouseY.set(e.clientY - rect.top);
-    };
-    el.addEventListener("mousemove", handleMove);
-    return () => el.removeEventListener("mousemove", handleMove);
-  }, [containerRef, mouseX, mouseY]);
-
-  return { springX, springY };
-}
-
 // ─────────────────────────────────────────────────────────────
 // Scroll-reveal wrapper
 // ─────────────────────────────────────────────────────────────
@@ -303,11 +283,10 @@ function IngestError({ error, onReset }: { error: string; onReset: () => void })
 // Main page
 // ─────────────────────────────────────────────────────────────
 export default function QueryPage() {
-  const { user, activeProject, can } = useAuth();
+  const { activeProject, can } = useAuth();
   const searchParams = useSearchParams();
+  const [workspaceMode, setWorkspaceMode] = useState<"query" | "upload">("query");
   const [tab, setTab] = useState<Tab>("query");
-  const pageRef = useRef<HTMLDivElement>(null);
-
   const [barFocus, setBarFocus] = useState(false);
 
   // ── Shared context ─────────────────────────────────────────
@@ -316,6 +295,15 @@ export default function QueryPage() {
   const canWriteKnowledge = can("knowledge:write");
 
   useEffect(() => {
+    const requestedMode = searchParams.get("mode");
+    const requestedTab = searchParams.get("tab");
+    if (requestedMode === "upload" || requestedTab === "upload") {
+      setWorkspaceMode("upload");
+      setTab("upload");
+    } else if (requestedMode === "query") {
+      setWorkspaceMode("query");
+      setTab("query");
+    }
     const source = searchParams.get("source");
     const filename = searchParams.get("filename");
     if (source && filename) {
@@ -331,7 +319,8 @@ export default function QueryPage() {
       setContextLabel(null);
       setResult(null);
       setQueryError(null);
-      if (tab !== "query") setTab("query");
+      setWorkspaceMode("query");
+      setTab("query");
     };
     window.addEventListener("recallai:project-changed", resetProjectContext);
     return () => window.removeEventListener("recallai:project-changed", resetProjectContext);
@@ -389,8 +378,8 @@ export default function QueryPage() {
     try {
       const data = await queryKnowledge(query, sourceContext || undefined);
       setResult(data);
-    } catch (e) {
-      setQueryError(e instanceof Error ? e.message : "Something went wrong");
+    } catch {
+      setQueryError("We couldn’t complete that query. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -415,9 +404,9 @@ export default function QueryPage() {
       setContextLabel(`📄 ${selectedFile.name}`);
       setSourceContext(`document:${selectedFile.name}`);
       setUploadResult("Ingestion completed successfully");
-    } catch (e) {
+    } catch {
       setUploadState("error");
-      setUploadError(e instanceof Error ? e.message : "Upload failed");
+      setUploadError("We couldn’t ingest this file. Please try again.");
     }
   }
   function resetUpload() {
@@ -446,9 +435,9 @@ export default function QueryPage() {
       setContextLabel(`📊 ${selectedExcel.name}`);
       setSourceContext(`document:${selectedExcel.name}`);
       setExcelResult("Ingestion completed successfully");
-    } catch (e) {
+    } catch {
       setExcelState("error");
-      setExcelError(e instanceof Error ? e.message : "Excel upload failed");
+      setExcelError("We couldn’t ingest this spreadsheet. Please try again.");
     }
   }
   function resetExcel() {
@@ -470,9 +459,9 @@ export default function QueryPage() {
       setContextLabel(`💬 #${channelId.trim()}`);
       setSourceContext(`slack:${channelId.trim()}`);
       setSlackResult("Ingestion completed successfully");
-    } catch (e) {
+    } catch {
       setSlackState("error");
-      setSlackError(e instanceof Error ? e.message : "Slack ingest failed");
+      setSlackError("We couldn’t ingest this Slack channel. Please try again.");
     }
   }
   function resetSlack() {
@@ -494,9 +483,9 @@ export default function QueryPage() {
       setContextLabel(`🎵 ${audioFile.name}`);
       setSourceContext(`audio:${audioFile.name}`);
       setAudioResult("Ingestion completed successfully");
-    } catch (e) {
+    } catch {
       setAudioState("error");
-      setAudioError(e instanceof Error ? e.message : "Audio ingest failed");
+      setAudioError("We couldn’t process this audio or video file. Please try again.");
     }
   }
   function resetAudio() {
@@ -525,9 +514,9 @@ export default function QueryPage() {
       setContextLabel(`🖼️ ${imageFile.name}`);
       setSourceContext(`image:${imageFile.name}`);
       setImageResult("Ingestion completed successfully");
-    } catch (e) {
+    } catch {
       setImageState("error");
-      setImageError(e instanceof Error ? e.message : "Image ingest failed");
+      setImageError("We couldn’t extract knowledge from this image. Please try again.");
     }
   }
   function resetImage() {
@@ -540,6 +529,7 @@ export default function QueryPage() {
 
   // ── Tab switch ─────────────────────────────────────────────
   function switchTab(id: Tab) {
+    setWorkspaceMode(id === "query" ? "query" : "upload");
     if (id !== "query") {
       setSourceContext(null); setContextLabel(null);
       if (imagePreviewUrl) { URL.revokeObjectURL(imagePreviewUrl); setImagePreviewUrl(null); }
@@ -555,7 +545,9 @@ export default function QueryPage() {
     { id: "image",  label: "Image OCR",   icon: ImageIcon },
     { id: "slack",  label: "Slack",        icon: MessageSquare },
   ];
-  const visibleTabs = canWriteKnowledge ? TABS : TABS.filter((item) => item.id === "query");
+  const visibleTabs = canWriteKnowledge
+    ? TABS.filter((item) => workspaceMode === "query" ? item.id === "query" : item.id !== "query")
+    : TABS.filter((item) => item.id === "query");
 
   const tabPanelVariants = {
     enter: { opacity: 0, y: 16, scale: 0.98 },
@@ -564,7 +556,7 @@ export default function QueryPage() {
   };
 
   return (
-    <div ref={pageRef} className="relative min-h-screen overflow-hidden bg-background">
+    <div className="min-h-screen bg-background">
       {/* ── Parallax orbs ─────────────────────────────────────── */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         {/* Grid lines */}
@@ -576,37 +568,10 @@ export default function QueryPage() {
         />
       </div>
 
-      <div className="relative z-10 max-w-5xl mx-auto px-6 py-24 md:py-28">
+      <div className="page-container max-w-5xl">
 
         {/* ── Header ──────────────────────────────────────────── */}
-        <motion.div
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          className="mb-8 rounded-xl border border-card-border-strong bg-card/45 p-5"
-        >
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-foreground-dim">
-                <FolderKanban size={14} />
-                Workspace
-              </div>
-              <h1 className="mt-2 text-2xl font-bold tracking-tight text-foreground md:text-3xl">
-                {activeProject?.name ?? "Project memory"}
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-foreground-muted">
-                Search, ingest, and review knowledge inside this project only. Files, graph data, vectors, and activity are isolated from every other workspace.
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2 rounded-lg border border-card-border bg-background-secondary/70 px-3 py-2">
-              <ShieldCheck size={16} className="text-success" />
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-foreground-dim">Access</p>
-                <p className="text-xs font-semibold text-foreground">{activeProject?.role ?? "Viewer"}</p>
-              </div>
-            </div>
-          </div>
-        </motion.div>
+        <div className="page-header"><div><p className="page-eyebrow">{activeProject ? `Workspace / ${activeProject.name}` : "Workspace"}</p><h1 className="page-title">Ask knowledge</h1><p className="page-description">Ask questions, scope them to a source, or add knowledge to this workspace.</p></div><div className="flex shrink-0 items-center gap-2 rounded-md border border-card-border bg-card px-3 py-2"><ShieldCheck size={16} className="text-success" /><div><p className="text-[10px] font-semibold uppercase tracking-wider text-foreground-dim">Access</p><p className="text-xs font-semibold text-foreground">{activeProject?.role ?? "Viewer"}</p></div></div></div>
 
         {/* ── Tabs ────────────────────────────────────────────── */}
         <FadeUp delay={0.05} className="mb-6">
@@ -671,6 +636,38 @@ export default function QueryPage() {
                   </motion.div>
                 )}
               </AnimatePresence>
+
+              <div className="mb-6 rounded-2xl border border-card-border bg-card/30 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Query a specific source</p>
+                    <p className="mt-1 text-xs text-foreground-muted">Choose a project file to restrict this question to that source.</p>
+                  </div>
+                  {sourceContext && (
+                    <button
+                      type="button"
+                      onClick={() => { setSourceContext(null); setContextLabel(null); }}
+                      className="text-xs text-foreground-dim transition-colors hover:text-foreground"
+                    >
+                      Clear filter
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-72 min-h-24">
+                  <FileSelector
+                    selectedSource={sourceContext ?? undefined}
+                    onSelectFile={(source, filename) => {
+                      if (!source) {
+                        setSourceContext(null);
+                        setContextLabel(null);
+                        return;
+                      }
+                      setSourceContext(source);
+                      setContextLabel(`📄 ${filename}`);
+                    }}
+                  />
+                </div>
+              </div>
 
               {/* ── Search bar ── */}
               <motion.div

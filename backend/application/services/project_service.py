@@ -4,10 +4,9 @@ import logging
 import re
 import uuid
 
-from neo4j import GraphDatabase
-
 from application.services.auth_service import AuthenticatedUser
 from core.config import settings
+from db.neo import _driver
 from domain.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -24,12 +23,6 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "CONTRIBUTOR": {"project:read", "knowledge:read", "knowledge:write"},
     "VIEWER": {"project:read", "knowledge:read"},
 }
-
-_driver = GraphDatabase.driver(
-    settings.neo4j_uri,
-    auth=(settings.neo4j_username, settings.neo4j_password),
-)
-
 
 @dataclass(frozen=True)
 class ProjectContext:
@@ -221,10 +214,42 @@ class ProjectService:
             "chroma": chroma_result,
         }
 
+    def update_project(self, project_id: str, name: str, user: AuthenticatedUser) -> dict:
+        name = name.strip()
+        if not name:
+            raise ValidationError("Workspace name cannot be blank")
+        with _driver.session() as session:
+            result = session.run(
+                """
+                MATCH (u:User {id: $user_id})-[m:MEMBER_OF]->(p:Project {id: $project_id})
+                WHERE p.organization_id = $organization_id AND coalesce(p.status, 'ACTIVE') = 'ACTIVE'
+                WITH p, m
+                WHERE m.role IN ['OWNER', 'ADMIN']
+                SET p.name = $name
+                RETURN p.id as id, p.name as name, p.slug as slug,
+                       p.organization_id as organization_id,
+                       CASE WHEN m.role = 'OWNER' THEN 'OWNER' ELSE 'ADMIN' END as role,
+                       p.created_at as created_at
+                """,
+                user_id=user.user_id,
+                project_id=project_id,
+                organization_id=user.organization_id or DEFAULT_ORGANIZATION_ID,
+                name=name,
+            ).single()
+            if not result:
+                raise AuthorizationError("Only workspace owners or admins can edit this workspace")
+            role = result["role"] or "ADMIN"
+            return {
+                "id": result["id"], "name": result["name"], "slug": result["slug"],
+                "organization_id": result["organization_id"], "role": role,
+                "permissions": sorted(ROLE_PERMISSIONS[role]), "created_at": result["created_at"],
+            }
+
     def ensure_default_project(self, user: AuthenticatedUser) -> None:
         timestamp = _now()
         with _driver.session() as session:
             self._ensure_constraints(session)
+            self._migrate_single_member_legacy_projects(session, user)
             session.run(
                 """
                 MERGE (org:Organization {id: $organization_id})
@@ -239,7 +264,9 @@ class ProjectService:
                     p.name = coalesce(p.name, $project_name),
                     p.status = coalesce(p.status, 'ACTIVE')
                 MERGE (u:User {id: $user_id})
-                SET u.email = $email
+                SET u.email = $email,
+                    u.organization_id = $organization_id
+                MERGE (u)-[:MEMBER_OF_ORGANIZATION]->(org)
                 WITH u, p
                 OPTIONAL MATCH (u)-[existing:MEMBER_OF]->(p)
                 WITH u, p, collect(existing) as memberships
@@ -248,41 +275,60 @@ class ProjectService:
                 )
                 """,
                 organization_id=user.organization_id or DEFAULT_ORGANIZATION_ID,
-                organization_name="Default Organization",
+                organization_name="Workspace Organization",
                 project_id=DEFAULT_PROJECT_ID,
                 project_name="Main Workspace",
                 user_id=user.user_id,
                 email=user.email,
                 timestamp=timestamp,
             )
-            self._deduplicate_default_project_nodes(session)
+            self._deduplicate_default_project_nodes(session, user.organization_id or DEFAULT_ORGANIZATION_ID)
             self._deduplicate_user_project_memberships(session, user.user_id)
-            session.run(
+
+    def _migrate_single_member_legacy_projects(self, session, user: AuthenticatedUser) -> None:
+        """Safely move legacy development data out of the shared `default` org.
+
+        Legacy projects with multiple users are intentionally left untouched:
+        ownership cannot be inferred safely, so moving or cloning them would
+        risk a new cross-organization disclosure.  A one-member project is
+        unambiguous; its graph/file data is migrated immediately after the
+        project record.
+        """
+        organization_id = user.organization_id or DEFAULT_ORGANIZATION_ID
+        if organization_id == DEFAULT_ORGANIZATION_ID:
+            return
+        with session.begin_transaction() as transaction:
+            result = transaction.run(
                 """
-                MATCH (d:Decision)
-                WHERE d.project_id IS NULL
-                SET d.project_id = $project_id,
-                    d.organization_id = coalesce(d.organization_id, $organization_id)
-                WITH collect(d) as decisions
-                MATCH (p:Project {id: $project_id})
-                FOREACH (decision IN decisions | MERGE (decision)-[:BELONGS_TO]->(p))
+                MATCH (u:User {id: $user_id})-[:MEMBER_OF]->(p:Project {organization_id: $legacy_organization_id})
+                CALL {
+                    WITH p
+                    MATCH (:User)-[membership:MEMBER_OF]->(p)
+                    RETURN count(membership) AS member_count
+                }
+                WITH p, member_count
+                WHERE member_count = 1
+                SET p.organization_id = $organization_id
+                RETURN collect(p.id) AS project_ids
                 """,
-                project_id=DEFAULT_PROJECT_ID,
-                organization_id=user.organization_id or DEFAULT_ORGANIZATION_ID,
-            )
-            session.run(
-                """
-                MATCH (f:File)
-                WHERE f.project_id IS NULL
-                SET f.project_id = $project_id,
-                    f.organization_id = coalesce(f.organization_id, $organization_id)
-                WITH collect(f) as files
-                MATCH (p:Project {id: $project_id})
-                FOREACH (file IN files | MERGE (file)-[:BELONGS_TO]->(p))
-                """,
-                project_id=DEFAULT_PROJECT_ID,
-                organization_id=user.organization_id or DEFAULT_ORGANIZATION_ID,
-            )
+                user_id=user.user_id,
+                organization_id=organization_id,
+                legacy_organization_id=DEFAULT_ORGANIZATION_ID,
+            ).single()
+            project_ids = result["project_ids"] if result else []
+            if project_ids:
+                transaction.run(
+                    """
+                    MATCH (n)
+                    WHERE n.project_id IN $project_ids
+                      AND coalesce(n.organization_id, $legacy_organization_id) = $legacy_organization_id
+                    SET n.organization_id = $organization_id
+                    """,
+                    project_ids=project_ids,
+                    organization_id=organization_id,
+                    legacy_organization_id=DEFAULT_ORGANIZATION_ID,
+                ).consume()
+            transaction.commit()
 
     def _ensure_constraints(self, session) -> None:
         for query in (
@@ -306,7 +352,7 @@ class ProjectService:
             user_id=user_id,
         ).consume()
 
-    def _deduplicate_default_project_nodes(self, session) -> None:
+    def _deduplicate_default_project_nodes(self, session, organization_id: str) -> None:
         session.run(
             """
             MATCH (p:Project {organization_id: $organization_id, slug: $project_id})
@@ -319,6 +365,6 @@ class ProjectService:
                     canonical.created_at = coalesce(canonical.created_at, duplicate.created_at)
             )
             """,
-            organization_id=DEFAULT_ORGANIZATION_ID,
+            organization_id=organization_id,
             project_id=DEFAULT_PROJECT_ID,
         ).consume()

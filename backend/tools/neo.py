@@ -8,10 +8,11 @@ class SearchDecisionsInput(BaseModel):
     query: str
     source_filter: Optional[str] = None
     project_id: Optional[str] = None
+    organization_id: Optional[str] = None
 
 
-def _search_decisions(query: str, source_filter: Optional[str] = None, project_id: Optional[str] = None) -> str:
-    records = neo_search(query, source_filter=source_filter, project_id=project_id)
+def _search_decisions(query: str, source_filter: Optional[str] = None, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> str:
+    records = neo_search(query, source_filter=source_filter, project_id=project_id, organization_id=organization_id)
     if not records:
         return f"No decisions found for: {query}"
     output = []

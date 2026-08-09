@@ -1,8 +1,7 @@
 from dotenv import load_dotenv; load_dotenv()
-from core.config import settings
-from neo4j import GraphDatabase
+from db.neo import get_driver, close_driver
 
-driver = GraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_username, settings.neo4j_password))
+driver = get_driver()
 with driver.session() as s:
     print("=== NODES ===")
     for r in s.run("MATCH (n) RETURN labels(n) as l, count(n) as c").data():
@@ -36,3 +35,4 @@ except Exception as e:
 print("\n=== SEARCH TEST ===")
 from db.neo import neo_search
 print(neo_search("test"))
+close_driver()

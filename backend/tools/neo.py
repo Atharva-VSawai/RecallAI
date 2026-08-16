@@ -11,8 +11,20 @@ class SearchDecisionsInput(BaseModel):
     organization_id: Optional[str] = None
 
 
-def _search_decisions(query: str, source_filter: Optional[str] = None, project_id: Optional[str] = None, organization_id: Optional[str] = None) -> str:
-    records = neo_search(query, source_filter=source_filter, project_id=project_id, organization_id=organization_id)
+def _search_decisions(
+    query: str,
+    source_filter: Optional[str] = None,
+    project_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+) -> str:
+    # neo_search uses fulltext index which handles missing org/project gracefully,
+    # but we still pass them for proper tenant isolation.
+    records = neo_search(
+        query,
+        organization_id=organization_id,
+        project_id=project_id,
+        source_filter=source_filter,
+    )
     if not records:
         return f"No decisions found for: {query}"
     output = []

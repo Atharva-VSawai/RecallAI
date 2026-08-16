@@ -23,6 +23,12 @@ def create_project(request: CreateProjectRequest, user: AuthenticatedUser = Depe
     return {"status": "success", "project": ProjectService().create_project(request.name, user)}
 
 
+@router.post("/init")
+def init_default_project(user: AuthenticatedUser = Depends(get_current_user)):
+    ProjectService().ensure_default_project(user)
+    return {"status": "success"}
+
+
 @router.delete("/{project_id}")
 def delete_project(project_id: str, user: AuthenticatedUser = Depends(get_current_user)):
     return {"status": "success", **ProjectService().delete_project(project_id, user)}

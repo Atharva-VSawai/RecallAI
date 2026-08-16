@@ -7,6 +7,7 @@ from application.services.teams_service import TeamsService
 from api.dependencies import get_current_user, get_project_context, require_project_permission
 from api.rate_limit import TEAMS_SYNC_LIMIT, require_rate_limit
 from core.config import settings
+from domain.exceptions import ValidationError
 
 router = APIRouter(prefix="/integrations/teams", tags=["microsoft-teams"])
 
@@ -38,7 +39,8 @@ def meetings(project: ProjectContext = Depends(require_project_permission("knowl
 def meeting(meeting_id: str, project: ProjectContext = Depends(require_project_permission("knowledge:read"))): return TeamsService().meeting(project, meeting_id)
 
 @router.post("/sync")
-def sync(user: AuthenticatedUser = Depends(get_current_user), project: ProjectContext = Depends(require_project_permission("knowledge:write")), _: None = Depends(require_rate_limit("teams-sync", TEAMS_SYNC_LIMIT))): return TeamsService().sync(project, user)
+def sync(background_tasks: BackgroundTasks, user: AuthenticatedUser = Depends(get_current_user), project: ProjectContext = Depends(require_project_permission("knowledge:write")), _: None = Depends(require_rate_limit("teams-sync", TEAMS_SYNC_LIMIT))): 
+    return TeamsService().sync(project, user, background_tasks=background_tasks)
 
 @router.post("/notifications")
 def notifications(background_tasks: BackgroundTasks, payload: dict | None = None, validationToken: str | None = Query(default=None)):
@@ -46,11 +48,17 @@ def notifications(background_tasks: BackgroundTasks, payload: dict | None = None
     # production deployments can enqueue resource notifications here.
     if validationToken:
         return PlainTextResponse(validationToken)
-    expected_state = settings.teams_webhook_client_state or settings.teams_token_encryption_key
+    # Graph validation handshakes are unauthenticated by design. Actual
+    # notifications require an explicitly configured clientState; falling
+    # back to an encryption key made an unset/misconfigured webhook open to
+    # arbitrary sync triggers.
+    expected_state = settings.teams_webhook_client_state.strip()
+    if not expected_state:
+        raise ValidationError("Teams webhook authentication is not configured")
     for notification in (payload or {}).get("value", []):
-        if expected_state and notification.get("clientState") != expected_state:
+        if notification.get("clientState") != expected_state:
             continue
         subscription_id = notification.get("subscriptionId")
         if subscription_id:
-            background_tasks.add_task(TeamsService().sync_subscription, subscription_id)
+            background_tasks.add_task(TeamsService().sync_subscription, subscription_id, background_tasks)
     return {"status": "accepted", "received": len((payload or {}).get("value", []))}

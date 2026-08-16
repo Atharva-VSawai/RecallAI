@@ -9,6 +9,7 @@ from core.llm import get_llm
 from ingestion.audio import transcribe_audio
 from ingestion.excel import extract_text_from_excel
 from ingestion.image import extract_text_from_image
+from ingestion.document import extract_text_from_document
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,11 @@ MEETING_PROMPT = ChatPromptTemplate.from_messages([
 def _structure_and_store(
     raw_text: str,
     source: str,
+    organization_id: str,
+    project_id: str,
     provider: str = "groq",
     store_graph: bool = True,
     store_vector: bool = True,
-    project_id: str | None = None,
-    organization_id: str = "default",
 ) -> dict:
     """Extract content and optionally write legacy projections.
 
@@ -69,7 +70,7 @@ def _structure_and_store(
     """
     if store_vector:
         from db.chroma import chroma_store
-        chroma_store(content=raw_text, source=source, project_id=project_id)
+        chroma_store(content=raw_text, source=source, organization_id=organization_id, project_id=project_id)
 
     llm = get_llm(provider)
     chain = PROMPT | llm.with_structured_output(ExtractionResult)
@@ -109,32 +110,34 @@ def _structure_and_store(
     return {"ingested": len(items), "items": items, "raw_text": raw_text}
 
 
-def run_ingestion(file_bytes: bytes, filename: str, source: str = "document", provider: str = "groq", store_graph: bool = True, store_vector: bool = True, project_id: str | None = None, organization_id: str = "default") -> dict:
+def run_ingestion(file_bytes: bytes, filename: str, organization_id: str, project_id: str, source: str = "document", provider: str = "groq", store_graph: bool = True, store_vector: bool = True) -> dict:
     file_ext = filename.lower().rsplit(".", 1)[-1]
-    if file_ext in {"xlsx", "xls"}:
+    if file_ext in {"docx", "txt", "md", "markdown", "rtf", "html", "htm", "csv", "log"}:
+        raw_text = extract_text_from_document(file_bytes, filename)
+    elif file_ext in {"xlsx", "xls"}:
         raw_text = extract_text_from_excel(file_bytes, filename)
     elif file_ext == "pdf":
         document = fitz.open(stream=file_bytes, filetype="pdf")
         raw_text = "\n".join(page.get_text() for page in document)
     elif file_ext in {"png", "jpg", "jpeg", "gif", "webp"}:
         raw_text = extract_text_from_image(file_bytes, filename, provider=provider)
-    elif file_ext in {"mp3", "wav", "m4a", "mp4", "mov", "avi", "mkv", "flac", "ogg", "webm"}:
+    elif file_ext in {"mp3", "wav", "m4a", "mp4", "mov", "avi", "mkv", "flac", "ogg", "webm", "m4v", "3gp"}:
         raw_text = transcribe_audio(file_bytes, filename)
     else:
         raise ValueError(f"Unsupported file type: {file_ext}")
-    return _structure_and_store(raw_text, source, provider, store_graph, store_vector, project_id, organization_id)
+    return _structure_and_store(raw_text, source, organization_id, project_id, provider, store_graph, store_vector)
 
 
-def run_ingestion_from_text(raw_text: str, source: str, provider: str = "groq", store_graph: bool = True, store_vector: bool = True, project_id: str | None = None, organization_id: str = "default") -> dict:
-    return _structure_and_store(raw_text, source, provider, store_graph, store_vector, project_id, organization_id)
+def run_ingestion_from_text(raw_text: str, source: str, organization_id: str, project_id: str, provider: str = "groq", store_graph: bool = True, store_vector: bool = True) -> dict:
+    return _structure_and_store(raw_text, source, organization_id, project_id, provider, store_graph, store_vector)
 
 
-def run_meeting_ingestion_from_text(raw_text: str, source: str, meeting_id: str, provider: str = "groq", project_id: str | None = None, organization_id: str = "default", metadata: dict | None = None) -> dict:
+def run_meeting_ingestion_from_text(raw_text: str, source: str, meeting_id: str, organization_id: str, project_id: str, provider: str = "groq", metadata: dict | None = None) -> dict:
     """Use the same chunking and vector path as all other sources, with richer meeting entities."""
     from db.chroma import chroma_store
     from db.neo import neo_store_meeting_knowledge
 
-    chroma_store(content=raw_text, source=source, metadata={"meeting_id": meeting_id, **(metadata or {})}, project_id=project_id)
+    chroma_store(content=raw_text, source=source, organization_id=organization_id, project_id=project_id, metadata={"meeting_id": meeting_id, **(metadata or {})})
     llm = get_llm(provider)
     chain = MEETING_PROMPT | llm.with_structured_output(MeetingExtractionResult)
     max_len = 1000 if provider == "ollama" else 100000

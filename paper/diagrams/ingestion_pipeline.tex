@@ -1,3 +1,0 @@
-\begin{tikzpicture}[font=\scriptsize,>=Latex,node distance=7mm, b/.style={draw,rounded corners,align=center,minimum width=22mm,minimum height=7mm,fill=blue!8}, a/.style={->,thick}]
-\node[b](in){PDF / image / Excel / audio};\node[b,right=of in](dec){Extension dispatch};\node[b,right=of dec](parse){Parser / OCR / transcription};\node[b,right=of parse](ext){Schema extraction};\node[b,right=of ext](out){Neo4j + Chroma};\draw[a](in)--(dec)--(parse)--(ext)--(out);
-\end{tikzpicture}

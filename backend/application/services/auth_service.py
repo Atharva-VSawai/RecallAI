@@ -31,6 +31,8 @@ class AuthService:
         try:
             claims = self._decode_with_jwks(token, algorithm)
         except jwt.PyJWTError as exc:
+            import logging
+            logging.getLogger(__name__).warning("JWT validation failed algorithm=%s error_type=%s", algorithm, type(exc).__name__)
             raise AuthenticationError("Invalid or expired access token") from exc
         user_id = claims.get("sub")
         if not user_id:
@@ -45,7 +47,15 @@ class AuthService:
         signing_key = _jwks_client(jwks_url).get_signing_key_from_jwt(token)
         issuer = self._issuer
         options = {"verify_aud": bool(settings.supabase_jwt_audience), "verify_iss": bool(issuer)}
-        return jwt.decode(token, signing_key.key, algorithms=[algorithm], audience=settings.supabase_jwt_audience or None, issuer=issuer or None, options=options)
+        return jwt.decode(
+            token, 
+            signing_key.key, 
+            algorithms=[algorithm], 
+            audience=settings.supabase_jwt_audience or None, 
+            issuer=issuer or None, 
+            options=options,
+            leeway=120
+        )
 
     def _authenticate_shared_secret_token(self, token: str) -> AuthenticatedUser:
         """Validate legacy HS256 tokens through Supabase Auth, not the JWT secret."""
@@ -93,9 +103,34 @@ def _organization_id(identity: dict, user_id: str) -> str:
         identity.get("app_metadata") or {},
         identity.get("user_metadata") or {},
     )
+    claimed = None
     for metadata in metadata_sources:
         for field in ("organization_id", "org_id", "workspace_id"):
             value = metadata.get(field)
             if isinstance(value, str) and value.strip():
-                return f"org:{value.strip()}"
-    return f"user:{user_id}"
+                claimed = f"org:{value.strip()}"
+                break
+        if claimed:
+            break
+
+    # Claims are hints; persisted project membership is authoritative when it
+    # is available. This prevents a forged/stale workspace claim from moving a
+    # request into another tenant. Fail closed to the stable personal tenant
+    # when the graph is unavailable during authentication.
+    try:
+        from db.neo import get_driver
+        with get_driver().session() as session:
+            rows = session.run(
+                "MATCH (u:User {id: $user_id})-[:MEMBER_OF]->(p:Project) "
+                "WHERE p.organization_id IS NOT NULL AND coalesce(p.status, 'ACTIVE') = 'ACTIVE' "
+                "RETURN DISTINCT p.organization_id AS organization_id ORDER BY organization_id",
+                user_id=user_id,
+            ).data()
+        persisted = [str(row["organization_id"]) for row in rows if row.get("organization_id")]
+        if claimed and (not persisted or claimed in persisted):
+            return claimed
+        if persisted:
+            return persisted[0]
+    except Exception:
+        pass
+    return claimed or f"user:{user_id}"

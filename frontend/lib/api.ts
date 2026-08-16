@@ -105,7 +105,8 @@ export interface QueryResponse {
 
 export interface IngestSlackResponse {
   status: string;
-  result: Record<string, unknown>;
+  job_id?: string;
+  result?: Record<string, unknown>;
   suggested_questions?: string[];
 }
 
@@ -126,6 +127,14 @@ export interface FileMetadata {
   source: string;
   uploaded_at: string;
   project_id?: string;
+}
+
+export interface FilePage {
+  files: FileMetadata[];
+  page: number;
+  page_size: number;
+  total: number;
+  has_more: boolean;
 }
 
 export async function listProjects(): Promise<Project[]> {
@@ -302,14 +311,14 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
-export async function listFiles(): Promise<FileMetadata[]> {
+export async function listFiles(page = 1, pageSize = 50): Promise<FilePage> {
   let res: Response | null = null;
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
   try {
     // Let authenticatedFetch handle the Authorization header internally —
     // passing headers here would call getValidSession() twice.
-    res = await authenticatedFetch(`${BASE}/files/list`, { cache: 'no-store' });
+    res = await authenticatedFetch(`${BASE}/files/list?page=${page}&page_size=${pageSize}`, { cache: 'no-store' });
     if (![502, 503, 504].includes(res.status) || attempt === 3) break;
     await new Promise((resolve) => window.setTimeout(resolve, 300 * 2 ** (attempt - 1)));
   } catch (err) {
@@ -334,7 +343,7 @@ export async function listFiles(): Promise<FileMetadata[]> {
   }
   if (!res.ok) throw await readApiError(res, "Failed to fetch files");
   const data = await res.json();
-  return Array.isArray(data.files) ? data.files : [];
+  return { files: Array.isArray(data.files) ? data.files : [], page: data.page ?? page, page_size: data.page_size ?? pageSize, total: data.total ?? 0, has_more: Boolean(data.has_more) };
 }
 
 export interface GraphNode {
@@ -344,6 +353,7 @@ export interface GraphNode {
   source?: string;
   subject?: string;
   impact?: string;
+  color: string;
 }
 
 export interface GraphEdge {
@@ -434,7 +444,7 @@ export async function deleteFile(source: string): Promise<boolean> {
 
 export interface TeamsStatus { connected: boolean; provider: string; status?: string; email?: string | null; updated_at?: number | null; subscription_configured?: boolean; mock_transcripts_enabled?: boolean; }
 export interface TeamsMeeting { id: string; title: string; source: string; start?: string; end?: string; synced_at?: number; }
-export interface TeamsSyncResponse { status: string; count: number; mocked_count: number; meetings: unknown[]; transcript_access: "available" | "mock" | "requires_admin_consent"; message?: string; }
+export interface TeamsSyncResponse { status: string; job_id?: string; count?: number; mocked_count?: number; meetings?: unknown[]; transcript_access?: "available" | "mock" | "requires_admin_consent"; message?: string; }
 
 export async function getTeamsStatus(): Promise<TeamsStatus> {
   const res = await authenticatedFetch(`${BASE}/integrations/teams/status`, { cache: "no-store" });
@@ -471,4 +481,40 @@ export async function getTeamsMeeting(id: string): Promise<TeamsMeeting & { know
   const res = await authenticatedFetch(`${BASE}/integrations/teams/meetings/${encodeURIComponent(id)}`, { cache: "no-store" });
   if (!res.ok) throw await readApiError(res, "Failed to load meeting details");
   return res.json();
+}
+
+export interface JobStatusResponse {
+  job_id: string;
+  status: "QUEUED" | "PROCESSING" | "COMPLETED" | "FAILED" | "CANCELLED" | "STALE";
+  progress: number;
+  error_message?: string;
+  result?: string;
+}
+
+export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
+  const res = await authenticatedFetch(`${BASE}/ingest/status/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+  if (!res.ok) throw await readApiError(res, "Failed to get job status");
+  return res.json();
+}
+
+export async function pollJob(jobId: string, onProgress?: (progress: number) => void): Promise<string> {
+  while (true) {
+    const status = await getJobStatus(jobId);
+    if (status.status === "COMPLETED") {
+      return status.result ?? "Ingestion completed successfully";
+    }
+    if (status.status === "FAILED") {
+      throw new Error(status.error_message ?? "Job failed");
+    }
+    if (status.status === "CANCELLED") {
+      throw new Error("Job was cancelled");
+    }
+    if (status.status === "STALE") {
+      throw new Error("Job became stale and must be retried");
+    }
+    if (status.status === "PROCESSING" && status.progress != null && onProgress) {
+      onProgress(status.progress);
+    }
+    await new Promise(r => setTimeout(r, 1000));
+  }
 }

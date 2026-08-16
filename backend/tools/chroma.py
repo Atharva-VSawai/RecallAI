@@ -8,10 +8,26 @@ class SearchRawMemoryInput(BaseModel):
     query: str
     source_filter: Optional[str] = None
     project_id: Optional[str] = None
+    organization_id: Optional[str] = None
 
 
-def _search_raw_memory(query: str, source_filter: Optional[str] = None, project_id: Optional[str] = None) -> str:
-    docs = chroma_search(query, k=3, source_filter=source_filter, project_id=project_id)
+def _search_raw_memory(
+    query: str,
+    source_filter: Optional[str] = None,
+    project_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+) -> str:
+    # organization_id and project_id are required by chroma_search for tenant isolation.
+    # When not provided (e.g. missing context), fall back gracefully instead of crashing.
+    if not organization_id or not project_id:
+        return "No relevant content found in raw memory."
+    docs = chroma_search(
+        query,
+        organization_id=organization_id,
+        project_id=project_id,
+        k=3,
+        source_filter=source_filter,
+    )
     if not docs:
         return "No relevant content found in raw memory."
     results = []

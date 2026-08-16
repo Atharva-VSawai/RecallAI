@@ -27,5 +27,7 @@ def test_slack_schema_rejects_invalid_channel(channel):
 
 
 def test_ingestion_rejects_unsupported_file_without_storage():
+    from fastapi import BackgroundTasks
+    bg = BackgroundTasks()
     with pytest.raises(ValidationError):
-        IngestionService().ingest_upload(b"text", "unsafe.exe", object(), "groq")
+        IngestionService().ingest_upload(bg, b"text", "unsafe.exe", object(), "groq")

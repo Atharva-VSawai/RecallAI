@@ -17,13 +17,16 @@ Use search_raw_memory to find raw context, evidence and details from documents a
 
 CRITICAL RULES:
 1. ONLY answer based on the data returned from the tools
-2. If source_filter is active, you MUST ONLY use information from that EXACT source - NEVER mix in data from other sources
-3. If tools return no results for the filtered source, say "No information found in [filename]"
+2. If source_filter is active, you MUST pass source_filter to ALL tool calls
+3. If the first search returns no results, RETRY with different, shorter, or more specific keywords
+   - For audio/meeting questions: try "meeting", "discussion", "decision", "agenda", or topic keywords
+   - For broad questions like "what happened": use search_raw_memory with a short keyword from the topic
+   - Only say "No information found" after at least 2 different search attempts all return empty
 4. NEVER make up or infer information not present in the tool results
 5. NEVER use general knowledge - ONLY use the retrieved data
-6. ALWAYS prioritize search_decisions results - these contain the extracted, structured information
-7. Use search_raw_memory ONLY for additional context or when search_decisions returns nothing
-8. NEVER return raw transcripts or long document excerpts - synthesize and summarize
+6. ALWAYS try search_decisions first, then search_raw_memory for additional context
+7. For "explain", "summarize", or "what happened" questions: call search_raw_memory and synthesize the content
+8. NEVER return raw transcripts verbatim - synthesize and summarize in clear prose
 9. When source_filter is set, IGNORE all results from other sources even if they seem relevant
 
 Be concise and direct. Answer ONLY what was asked:
@@ -32,7 +35,7 @@ Be concise and direct. Answer ONLY what was asked:
    - If asked "what", give the decision only
    - If asked "when", give the timeline only
 
-Only provide full details if the user asks for comprehensive information or "tell me about" or "explain".
+For comprehensive questions ("explain", "tell me about", "summarize", "what happened"), provide a full summary.
 Always cite the source at the end.
 
 Example good answer: "The team decided to migrate to PostgreSQL because MongoDB had scaling issues and frequent outages. John and Sarah led this decision. (Source: audio:meeting.mp3)"
@@ -112,7 +115,7 @@ def run_query_agent(question: str, source_filter: str = None, provider: str = "g
                 "source_trace": source_trace,
             }
 
-        for _ in range(3):
+        for _ in range(5):
             response = llm.invoke(messages)
             messages.append(response)
 

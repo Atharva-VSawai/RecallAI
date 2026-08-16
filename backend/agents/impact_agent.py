@@ -16,8 +16,9 @@ You answer "what if" and "what breaks" questions about organizational decisions.
 
 CRITICAL RULES:
 1. ONLY answer based on the data returned from the tools
-2. If source_filter is active, you MUST ONLY use information from that EXACT source - NEVER mix in data from other sources
-3. If tools return no results for the filtered source, say "No information found in [filename]"
+2. If source_filter is active, you MUST pass source_filter to ALL tool calls
+3. If the first search returns no results, RETRY with different or shorter keywords before giving up
+   - Only say "No information found" after at least 2 different search attempts all return empty
 4. NEVER make up or infer information not present in the tool results
 5. NEVER use general knowledge - ONLY use the retrieved data
 6. NEVER return raw transcripts - synthesize and analyze
@@ -103,7 +104,7 @@ def run_impact_agent(question: str, source_filter: str = None, provider: str = "
                 "source_trace": source_trace,
             }
 
-        for _ in range(4):
+        for _ in range(5):
             response = llm.invoke(messages)
             messages.append(response)
 

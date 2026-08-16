@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Loader2, RotateCcw, ChevronDown,
@@ -10,13 +11,17 @@ import {
 } from "lucide-react";
 import {
   queryKnowledge, ingestFile, ingestSlack, ingestAudio,
-  ingestExcel, ingestImage, type QueryResponse,
+  ingestExcel, ingestImage, type QueryResponse, pollJob
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import SourceCard from "@/components/SourceCard";
 import AgentBadge from "@/components/AgentBadge";
 import FileSelector from "@/components/FileSelector";
 import { validateFile, validateQuery, validateSlackChannel } from "@/lib/validation";
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -28,7 +33,7 @@ const SUGGESTIONS = [
   "What alternatives were considered for the auth system?",
 ];
 
-type Tab = "query" | "upload" | "excel" | "audio" | "image" | "slack";
+type Tab = "query" | "upload" | "docs" | "excel" | "audio" | "image" | "slack";
 type IngestState = "idle" | "loading" | "success" | "error";
 
 // ─────────────────────────────────────────────────────────────
@@ -341,6 +346,11 @@ export default function QueryPage() {
   const [uploadResult, setUploadResult] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [docsFile, setDocsFile] = useState<File | null>(null);
+  const [docsState, setDocsState] = useState<IngestState>("idle");
+  const [docsResult, setDocsResult] = useState<string | null>(null);
+  const [docsError, setDocsError] = useState<string | null>(null);
+  const docsInputRef = useRef<HTMLInputElement>(null);
 
   const [selectedExcel, setSelectedExcel] = useState<File | null>(null);
   const [excelState, setExcelState] = useState<IngestState>("idle");
@@ -378,8 +388,9 @@ export default function QueryPage() {
     try {
       const data = await queryKnowledge(query, sourceContext || undefined);
       setResult(data);
-    } catch {
-      setQueryError("We couldn’t complete that query. Please try again.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : null;
+      setQueryError(msg || "We couldn't complete that query. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -398,21 +409,53 @@ export default function QueryPage() {
     if (validationError) { setUploadState("error"); setUploadError(validationError); return; }
     setUploadState("loading"); setUploadError(null); setUploadResult(null);
     try {
-      await ingestFile(selectedFile);
+      const res = await ingestFile(selectedFile);
+      if (res.job_id) {
+        await pollJob(res.job_id);
+      }
       window.dispatchEvent(new Event("recallai:files-changed"));
       setUploadState("success");
       setContextLabel(`📄 ${selectedFile.name}`);
       setSourceContext(`document:${selectedFile.name}`);
       setUploadResult("Ingestion completed successfully");
-    } catch {
+    } catch (e: unknown) {
       setUploadState("error");
-      setUploadError("We couldn’t ingest this file. Please try again.");
+      setUploadError(errorMessage(e, "We couldn’t ingest this file. Please try again."));
     }
   }
   function resetUpload() {
     setSelectedFile(null); setUploadState("idle"); setUploadResult(null);
     setUploadError(null); setSourceContext(null); setContextLabel(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  // ── Docs ───────────────────────────────────────────────────
+  function handleDocsDrop(e: React.DragEvent) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    const ext = file?.name.toLowerCase().split(".").pop();
+    if (file && ["docx", "txt", "md", "markdown", "rtf", "html", "htm", "csv", "log"].includes(ext || "")) setDocsFile(file);
+  }
+  async function handleDocsUpload() {
+    if (!canWriteKnowledge) { setDocsState("error"); setDocsError("You do not have permission to upload knowledge in this project."); return; }
+    if (!docsFile) return;
+    const validationError = validateFile(docsFile, ["docx", "txt", "md", "markdown", "rtf", "html", "htm", "csv", "log"]);
+    if (validationError) { setDocsState("error"); setDocsError(validationError); return; }
+    setDocsState("loading"); setDocsError(null); setDocsResult(null);
+    try {
+      const res = await ingestFile(docsFile);
+      if (res.job_id) await pollJob(res.job_id);
+      window.dispatchEvent(new Event("recallai:files-changed"));
+      setDocsState("success"); setContextLabel(`📄 ${docsFile.name}`); setSourceContext(`document:${docsFile.name}`);
+      setDocsResult("Document ingested successfully");
+    } catch (e: unknown) {
+      setDocsState("error"); setDocsError(errorMessage(e, "We couldn’t ingest this document. Please try again."));
+    }
+  }
+  function resetDocs() {
+    setDocsFile(null); setDocsState("idle"); setDocsResult(null); setDocsError(null);
+    setSourceContext(null); setContextLabel(null);
+    if (docsInputRef.current) docsInputRef.current.value = "";
   }
 
   // ── Excel ──────────────────────────────────────────────────
@@ -429,15 +472,18 @@ export default function QueryPage() {
     if (validationError) { setExcelState("error"); setExcelError(validationError); return; }
     setExcelState("loading"); setExcelError(null); setExcelResult(null);
     try {
-      await ingestExcel(selectedExcel);
+      const res = await ingestExcel(selectedExcel);
+      if (res.job_id) {
+        await pollJob(res.job_id);
+      }
       window.dispatchEvent(new Event("recallai:files-changed"));
       setExcelState("success");
       setContextLabel(`📊 ${selectedExcel.name}`);
       setSourceContext(`document:${selectedExcel.name}`);
       setExcelResult("Ingestion completed successfully");
-    } catch {
+    } catch (e: unknown) {
       setExcelState("error");
-      setExcelError("We couldn’t ingest this spreadsheet. Please try again.");
+      setExcelError(errorMessage(e, "We couldn’t ingest this spreadsheet. Please try again."));
     }
   }
   function resetExcel() {
@@ -453,15 +499,18 @@ export default function QueryPage() {
     if (validationError) { setSlackState("error"); setSlackError(validationError); return; }
     setSlackState("loading"); setSlackError(null); setSlackResult(null);
     try {
-      await ingestSlack(channelId.trim(), msgLimit);
+      const res = await ingestSlack(channelId.trim(), msgLimit);
+      if (res.job_id) {
+        await pollJob(res.job_id);
+      }
       window.dispatchEvent(new Event("recallai:files-changed"));
       setSlackState("success");
       setContextLabel(`💬 #${channelId.trim()}`);
       setSourceContext(`slack:${channelId.trim()}`);
       setSlackResult("Ingestion completed successfully");
-    } catch {
+    } catch (e: unknown) {
       setSlackState("error");
-      setSlackError("We couldn’t ingest this Slack channel. Please try again.");
+      setSlackError(errorMessage(e, "We couldn’t ingest this Slack channel. Please try again."));
     }
   }
   function resetSlack() {
@@ -473,19 +522,23 @@ export default function QueryPage() {
   async function handleAudioUpload() {
     if (!canWriteKnowledge) { setAudioState("error"); setAudioError("You do not have permission to upload knowledge in this project."); return; }
     if (!audioFile) return;
-    const validationError = validateFile(audioFile, ["mp3", "wav", "m4a", "flac", "ogg", "mp4", "mov", "avi", "mkv", "webm"]);
+    const validationError = validateFile(audioFile, ["mp3", "wav", "m4a", "flac", "ogg", "mp4", "mov", "avi", "mkv", "webm", "m4v", "3gp"]);
     if (validationError) { setAudioState("error"); setAudioError(validationError); return; }
     setAudioState("loading"); setAudioError(null); setAudioResult(null);
     try {
-      await ingestAudio(audioFile);
+      const res = await ingestAudio(audioFile);
+      if (res.job_id) {
+        await pollJob(res.job_id);
+      }
       window.dispatchEvent(new Event("recallai:files-changed"));
       setAudioState("success");
-      setContextLabel(`🎵 ${audioFile.name}`);
-      setSourceContext(`audio:${audioFile.name}`);
+      const isVideo = audioFile.type.startsWith("video/") || ["mp4", "mov", "avi", "mkv", "webm", "m4v", "3gp"].includes(audioFile.name.toLowerCase().split(".").pop() || "");
+      setContextLabel(`${isVideo ? "🎥" : "🎵"} ${audioFile.name}`);
+      setSourceContext(`${isVideo ? "video" : "audio"}:${audioFile.name}`);
       setAudioResult("Ingestion completed successfully");
-    } catch {
+    } catch (e: unknown) {
       setAudioState("error");
-      setAudioError("We couldn’t process this audio or video file. Please try again.");
+      setAudioError(errorMessage(e, "We couldn’t process this audio or video file. Please try again."));
     }
   }
   function resetAudio() {
@@ -508,15 +561,18 @@ export default function QueryPage() {
     if (!imageFile) return;
     setImageState("loading"); setImageError(null); setImageResult(null);
     try {
-      await ingestImage(imageFile);
+      const res = await ingestImage(imageFile);
+      if (res.job_id) {
+        await pollJob(res.job_id);
+      }
       window.dispatchEvent(new Event("recallai:files-changed"));
       setImageState("success");
       setContextLabel(`🖼️ ${imageFile.name}`);
       setSourceContext(`image:${imageFile.name}`);
       setImageResult("Ingestion completed successfully");
-    } catch {
+    } catch (e: unknown) {
       setImageState("error");
-      setImageError("We couldn’t extract knowledge from this image. Please try again.");
+      setImageError(errorMessage(e, "We couldn’t extract knowledge from this image. Please try again."));
     }
   }
   function resetImage() {
@@ -540,6 +596,7 @@ export default function QueryPage() {
   const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "query",  label: "Ask",        icon: Brain },
     { id: "upload", label: "PDF",          icon: FileText },
+    { id: "docs",   label: "Docs",         icon: FileText },
     { id: "excel",  label: "Excel",        icon: FileSpreadsheet },
     { id: "audio",  label: "Audio",        icon: Mic },
     { id: "image",  label: "Image OCR",   icon: ImageIcon },
@@ -619,7 +676,7 @@ export default function QueryPage() {
                     className="flex items-center gap-3 px-4 py-3 rounded-2xl border border-success/30 bg-success/10 text-success text-xs overflow-hidden"
                   >
                     {imagePreviewUrl && sourceContext?.startsWith("image:") ? (
-                      <img src={imagePreviewUrl} alt="" className="h-9 w-9 rounded-lg object-cover shrink-0 border border-success/30" />
+                      <Image src={imagePreviewUrl} alt="" width={36} height={36} unoptimized className="h-9 w-9 rounded-lg object-cover shrink-0 border border-success/30" />
                     ) : (
                       <CheckCircle2 size={14} />
                     )}
@@ -653,7 +710,7 @@ export default function QueryPage() {
                     </button>
                   )}
                 </div>
-                <div className="max-h-72 min-h-24">
+                <div className="flex flex-col overflow-hidden" style={{ maxHeight: "22rem" }}>
                   <FileSelector
                     selectedSource={sourceContext ?? undefined}
                     onSelectFile={(source, filename) => {
@@ -846,39 +903,52 @@ export default function QueryPage() {
           {/* ───── UPLOAD PDF TAB ────────────────────────────── */}
           {tab === "upload" && (
             <motion.div key="upload" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
-              <FadeUp>
-                <p className="text-sm text-foreground-muted leading-relaxed">
-                  Upload a PDF to add decisions, people, and supporting context to this project workspace.
-                </p>
-              </FadeUp>
-              <FadeUp delay={0.05}>
-                <DropZone
-                  file={selectedFile} label="Drop your PDF here" subLabel="or click to browse · PDF only"
-                  accept="application/pdf" inputRef={fileInputRef}
-                  onDrop={handleFileDrop} onSelect={(e) => { const f = e.target.files?.[0]; if (f) setSelectedFile(f); }}
-                  onRemove={resetUpload} icon={FileText} state={uploadState}
-                />
-              </FadeUp>
-              {selectedFile && uploadState === "idle" && (
-                <FadeUp delay={0.1}>
-                  <motion.button
-                    onClick={handleUpload}
-                    whileHover={{ scale: 1.03, y: -2 }}
-                    whileTap={{ scale: 0.97 }}
-                    className="w-full py-4 rounded-2xl text-white text-base font-bold flex items-center justify-center gap-3 bg-gradient-to-r from-accent to-accent-2 shadow-xl shadow-accent/20"
-                  >
-                    <Upload size={18} /> Ingest PDF
-                  </motion.button>
+              {!canWriteKnowledge ? (
+                <FadeUp>
+                  <div className="rounded-xl border border-card-border bg-card/50 p-6 text-center">
+                    <ShieldCheck size={24} className="mx-auto text-foreground-dim" />
+                    <h2 className="mt-3 text-base font-semibold text-foreground">Upload access required</h2>
+                    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-foreground-muted">
+                      You have Viewer access to this workspace. Ask an Owner or Admin to grant you Contributor access before adding PDFs, documents, spreadsheets, audio, images, or Slack knowledge.
+                    </p>
+                  </div>
                 </FadeUp>
-              )}
-              {uploadState === "loading" && <IngestProgressBar duration={8} />}
-              {uploadState === "error" && uploadError && <IngestError error={uploadError} onReset={resetUpload} />}
-              {uploadState === "success" && (
-                <IngestSuccess label="Document ingested successfully" result={uploadResult}
-                  onQuery={() => { setContextLabel(`📄 ${selectedFile?.name}`); setSourceContext(`document:${selectedFile?.name}`); switchTab("query"); }}
-                  onReset={resetUpload} resetLabel="Upload another" inputRef={inputRef}
-                />
-              )}
+              ) : <>
+                <FadeUp>
+                  <p className="text-sm text-foreground-muted leading-relaxed">
+                    Upload a PDF to add decisions, people, and supporting context to this project workspace.
+                  </p>
+                </FadeUp>
+                <FadeUp delay={0.05}>
+                  <DropZone
+                    file={selectedFile} label="Drop your PDF here" subLabel="or click to browse · PDF only"
+                    accept="application/pdf" inputRef={fileInputRef}
+                    onDrop={handleFileDrop} onSelect={(e) => { const f = e.target.files?.[0]; if (f) setSelectedFile(f); }}
+                    onRemove={resetUpload} icon={FileText} state={uploadState}
+                  />
+                </FadeUp>
+                {selectedFile && uploadState === "idle" && (
+                  <FadeUp delay={0.1}>
+                    <motion.button onClick={handleUpload} whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.97 }} className="w-full py-4 rounded-2xl text-white text-base font-bold flex items-center justify-center gap-3 bg-gradient-to-r from-accent to-accent-2 shadow-xl shadow-accent/20">
+                      <Upload size={18} /> Ingest PDF
+                    </motion.button>
+                  </FadeUp>
+                )}
+                {uploadState === "loading" && <IngestProgressBar duration={8} />}
+                {uploadState === "error" && uploadError && <IngestError error={uploadError} onReset={resetUpload} />}
+                {uploadState === "success" && <IngestSuccess label="Document ingested successfully" result={uploadResult} onQuery={() => { setContextLabel(`📄 ${selectedFile?.name}`); setSourceContext(`document:${selectedFile?.name}`); switchTab("query"); }} onReset={resetUpload} resetLabel="Upload another" inputRef={inputRef} />}
+              </>}
+            </motion.div>
+          )}
+
+          {tab === "docs" && (
+            <motion.div key="docs" variants={tabPanelVariants} initial="enter" animate="center" exit="exit" transition={{ duration: 0.3 }} className="space-y-5">
+              <FadeUp><p className="text-sm text-foreground-muted leading-relaxed">Upload Word or text documents to extract their contents and add them to this project workspace.</p></FadeUp>
+              <FadeUp delay={0.05}><DropZone file={docsFile} label="Drop your document here" subLabel="or click to browse · DOCX, TXT, Markdown, RTF, HTML, CSV" accept=".docx,.txt,.md,.markdown,.rtf,.html,.htm,.csv,.log" inputRef={docsInputRef} onDrop={handleDocsDrop} onSelect={(e) => { const f = e.target.files?.[0]; if (f) setDocsFile(f); }} onRemove={resetDocs} icon={FileText} state={docsState} /></FadeUp>
+              {docsFile && docsState === "idle" && <FadeUp delay={0.1}><motion.button onClick={handleDocsUpload} whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.97 }} className="w-full py-4 rounded-2xl text-white text-base font-bold flex items-center justify-center gap-3 bg-gradient-to-r from-accent to-accent-2 shadow-xl shadow-accent/20"><Upload size={18} /> Ingest Document</motion.button></FadeUp>}
+              {docsState === "loading" && <IngestProgressBar duration={8} />}
+              {docsState === "error" && docsError && <IngestError error={docsError} onReset={resetDocs} />}
+              {docsState === "success" && <IngestSuccess label="Document ingested successfully" result={docsResult} onQuery={() => { setContextLabel(`📄 ${docsFile?.name}`); setSourceContext(`document:${docsFile?.name}`); switchTab("query"); }} onReset={resetDocs} resetLabel="Upload another" inputRef={inputRef} />}
             </motion.div>
           )}
 
@@ -930,8 +1000,8 @@ export default function QueryPage() {
               </FadeUp>
               <FadeUp delay={0.05}>
                 <DropZone
-                  file={audioFile} label="Drop audio/video here" subLabel="or click to browse · MP3, WAV, MP4, MOV, etc."
-                  accept="audio/*,video/*,.mp3,.wav,.m4a,.mp4,.mov,.avi,.mkv" inputRef={audioInputRef}
+                  file={audioFile} label="Drop audio or video here" subLabel="or click to browse · MP3, WAV, MP4, MOV, MKV, WebM, etc."
+                  accept="audio/*,video/*,.mp3,.wav,.m4a,.flac,.ogg,.mp4,.mov,.avi,.mkv,.webm,.m4v,.3gp" inputRef={audioInputRef}
                   onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setAudioFile(f); }}
                   onSelect={(e) => { const f = e.target.files?.[0]; if (f) setAudioFile(f); }}
                   onRemove={resetAudio} icon={Mic} state={audioState}
@@ -952,7 +1022,7 @@ export default function QueryPage() {
               {audioState === "error" && audioError && <IngestError error={audioError} onReset={resetAudio} />}
               {audioState === "success" && (
                 <IngestSuccess label="Audio transcribed &amp; ingested" result={audioResult}
-                  onQuery={() => { setContextLabel(`🎵 ${audioFile?.name}`); setSourceContext(`audio:${audioFile?.name}`); switchTab("query"); }}
+                  onQuery={() => { const isVideo = audioFile?.type.startsWith("video/") || ["mp4", "mov", "avi", "mkv", "webm", "m4v", "3gp"].includes(audioFile?.name.toLowerCase().split(".").pop() || ""); setContextLabel(`${isVideo ? "🎥" : "🎵"} ${audioFile?.name}`); setSourceContext(`${isVideo ? "video" : "audio"}:${audioFile?.name}`); switchTab("query"); }}
                   onReset={resetAudio} resetLabel="Upload another" inputRef={inputRef}
                 />
               )}
@@ -979,7 +1049,7 @@ export default function QueryPage() {
               {imagePreviewUrl && (
                 <FadeUp delay={0.08}>
                   <div className="glass rounded-2xl border border-card-border p-2 overflow-hidden">
-                    <img src={imagePreviewUrl} alt="preview" className="w-full max-h-48 object-contain rounded-xl" />
+                    <Image src={imagePreviewUrl} alt="preview" width={640} height={192} unoptimized className="w-full max-h-48 object-contain rounded-xl" />
                   </div>
                 </FadeUp>
               )}

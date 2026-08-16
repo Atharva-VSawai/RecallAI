@@ -15,12 +15,12 @@ configure_logging()
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    from db.neo import close_driver, ensure_search_indexes, init_driver
+    from db.neo import close_driver, init_driver
     driver = init_driver()
     renewal_task = None
+    stale_job_task = asyncio.create_task(_stale_job_loop())
     try:
         await asyncio.to_thread(driver.verify_connectivity)
-        await asyncio.to_thread(ensure_search_indexes)
         logging.getLogger(__name__).info("neo4j.startup.connected")
     except Exception:
         logging.getLogger(__name__).exception("neo4j.startup.connectivity_check_failed")
@@ -32,6 +32,8 @@ async def lifespan(_app: FastAPI):
         if renewal_task:
             renewal_task.cancel()
             await asyncio.gather(renewal_task, return_exceptions=True)
+        stale_job_task.cancel()
+        await asyncio.gather(stale_job_task, return_exceptions=True)
         close_driver()
 
 
@@ -47,6 +49,17 @@ async def _teams_subscription_renewal_loop():
             # Renewal is best-effort; the next cycle or manual endpoint can retry.
             pass
 
+async def _stale_job_loop():
+    # BackgroundTasks execute in-process only; persisted jobs remain the source
+    # of truth and this loop merely exposes abandoned work as terminal STALE.
+    while True:
+        await asyncio.sleep(60)
+        try:
+            from application.services.job_service import JobService
+            await asyncio.to_thread(JobService().check_stale_jobs)
+        except Exception:
+            logging.getLogger(__name__).exception("ingestion.stale_job_check_failed")
+
 app.add_middleware(RequestContextMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -57,7 +70,7 @@ app.add_middleware(
     # loopback (`http://[::1]:3000`). Browsers surface a rejected CORS
     # preflight as the misleading generic `Failed to fetch` error.
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$",
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-LLM-Provider", "X-Project-ID", "X-Request-ID"],
 )
 register_exception_handlers(app)

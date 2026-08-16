@@ -35,3 +35,8 @@ class CreateProjectRequest(BaseModel):
 
 class UpdateProjectRequest(CreateProjectRequest):
     pass
+
+
+class BudgetRequest(BaseModel):
+    cost: float = Field(ge=0)
+    user_id: str | None = Field(default=None, max_length=200)

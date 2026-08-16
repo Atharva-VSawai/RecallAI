@@ -68,7 +68,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
     setError(null);
     try {
       const data = await listFiles();
-      setFiles(data);
+      setFiles(data.files);
     } catch (error) {
       console.error('Error loading files:', error);
       setFiles([]);
@@ -150,7 +150,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
   };
 
   return (
-    <div className="flex h-full flex-col space-y-4">
+    <div className="flex h-full min-h-0 flex-col space-y-3">
       <div className="rounded-xl border border-card-border bg-card/40 p-3">
         <p className="text-xs font-bold uppercase tracking-widest text-foreground-dim">Sources in workspace</p>
         <div className="mt-1 flex items-center justify-between gap-3">
@@ -213,7 +213,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1 custom-scrollbar">
           <div className="overflow-hidden rounded-xl border border-card-border">
             <AnimatePresence>
               {filteredFiles.map((file, i) => {

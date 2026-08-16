@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -81,9 +82,11 @@ export default function LoginPage() {
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
                 className="relative"
               >
-                <img
+                <Image
                   src="/logo2.png"
                   alt="Recall.AI"
+                  width={180}
+                  height={52}
                   className="h-16 w-auto object-contain relative z-10 drop-shadow-[0_0_24px_rgba(6,182,212,0.45)]"
                 />
                 <div className="absolute inset-0 bg-gradient-to-r from-accent/30 via-accent-2/30 to-accent-3/30 blur-2xl rounded-full" />

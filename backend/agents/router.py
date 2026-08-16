@@ -60,14 +60,7 @@ def route(question: str, provider: str = "groq") -> str:
 
 
 def run(question: str, source_filter: str = None, provider: str = "groq", project_id: str | None = None, organization_id: str | None = None) -> dict:
-    agent_type = route(question, provider=provider)
-
-    if agent_type == "IMPACT":
-        from agents.impact_agent import run_impact_agent
-        result = run_impact_agent(question, source_filter=source_filter, provider=provider, project_id=project_id, organization_id=organization_id)
-    else:
-        from agents.query_agent import run_query_agent
-        result = run_query_agent(question, source_filter=source_filter, provider=provider, project_id=project_id, organization_id=organization_id)
-
-    result["agent_used"] = agent_type
-    return result
+    # Phase 2 uses one deterministic retrieval/generation path for arbitrary questions.
+    # Keep route() available for compatibility and impact-specific callers.
+    from application.services.grounded_query_service import run_grounded_query
+    return run_grounded_query(question, source_filter, provider, project_id, organization_id)

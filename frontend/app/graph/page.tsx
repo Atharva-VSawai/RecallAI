@@ -1,19 +1,24 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { ForceGraphProps as ForceGraph2DProps } from "react-force-graph-2d";
+import type { ForceGraphProps as ForceGraph3DProps } from "react-force-graph-3d";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentType } from "react";
 import { Box, ChevronRight, Filter, Info, Layers, Maximize2, Network, RefreshCw, Search, Square, X } from "lucide-react";
 import { getGraphData, type GraphData, type GraphNode } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/state";
 
-const ForceGraph2D = dynamic<any>(() => import("react-force-graph-2d"), { ssr: false });
-const ForceGraph3D = dynamic<any>(() => import("react-force-graph-3d"), { ssr: false });
+const ForceGraph2D = dynamic<ForceGraph2DProps<GraphNode, GraphLink>>(() => import("react-force-graph-2d").then((module) => module.default as unknown as ComponentType<ForceGraph2DProps<GraphNode, GraphLink>>), { ssr: false });
+const ForceGraph3D = dynamic<ForceGraph3DProps<GraphNode, GraphLink>>(() => import("react-force-graph-3d").then((module) => module.default as unknown as ComponentType<ForceGraph3DProps<GraphNode, GraphLink>>), { ssr: false });
 
 type GraphLink = { source: string | GraphNode; target: string | GraphNode; label: string };
 type RenderNode = GraphNode & { color: string; x?: number; y?: number };
 type RenderGraph = { nodes: RenderNode[]; links: GraphLink[] };
+type ForceNode = { id?: string | number; x?: number; y?: number; [key: string]: unknown };
+type ForceLink = { source?: string | number | ForceNode; target?: string | number | ForceNode; [key: string]: unknown };
 
 const NODE_COLORS: Record<GraphNode["type"], string> = { Decision: "#3B82F6", Person: "#22C55E", Reason: "#F59E0B", Alternative: "#8B5CF6" };
 const NODE_TYPES = Object.keys(NODE_COLORS) as GraphNode["type"][];
@@ -76,13 +81,15 @@ export default function GraphPage() {
     return { nodes, links: data.links.filter((link) => ids.has(nodeId(link.source)) && ids.has(nodeId(link.target))) };
   }, [data, search, selectedSource, selectedType]);
 
-  const selectNode = useCallback((node: RenderNode) => {
+  const selectNode = useCallback((rawNode: ForceNode) => {
+    const node = rawNode as unknown as RenderNode;
     const connections = new Set<string>([node.id]);
     graphData.links.forEach((link) => { if (nodeId(link.source) === node.id || nodeId(link.target) === node.id) { connections.add(nodeId(link.source)); connections.add(nodeId(link.target)); } });
     setSelected(node); setHighlightedIds(connections);
   }, [graphData.links]);
 
-  const nodeCanvasObject = useCallback((node: RenderNode, context: CanvasRenderingContext2D, scale: number) => {
+  const nodeCanvasObject = useCallback((rawNode: ForceNode, context: CanvasRenderingContext2D, scale: number) => {
+    const node = rawNode as unknown as RenderNode;
     const isSelected = node.id === selected?.id;
     const isDimmed = highlightedIds.size > 0 && !highlightedIds.has(node.id);
     const radius = node.type === "Decision" ? 7 : 5;
@@ -100,7 +107,8 @@ export default function GraphPage() {
     }
   }, [highlightedIds, selected?.id]);
 
-  const linkColor = useCallback((link: GraphLink) => {
+  const linkColor = useCallback((rawLink: ForceLink) => {
+    const link = rawLink as unknown as GraphLink;
     const connected = highlightedIds.size === 0 || (highlightedIds.has(nodeId(link.source)) && highlightedIds.has(nodeId(link.target)));
     return connected ? "rgba(148,163,184,.45)" : "rgba(148,163,184,.10)";
   }, [highlightedIds]);

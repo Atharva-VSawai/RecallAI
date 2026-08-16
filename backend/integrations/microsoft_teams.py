@@ -131,7 +131,7 @@ class MicrosoftTeamsAdapter:
             "changeType": "created", "notificationUrl": webhook_url,
             "resource": f"users/{user_id}/onlineMeetings/getAllTranscripts", "expirationDateTime": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat().replace("+00:00", "Z"),
             "lifecycleNotificationUrl": webhook_url,
-            "clientState": settings.teams_webhook_client_state or settings.teams_token_encryption_key,
+            "clientState": settings.teams_webhook_client_state,
         }, timeout=30)
         if response.status_code >= 400:
             raise TeamsGraphError(f"Could not create Teams subscription: {response.text[:300]}")

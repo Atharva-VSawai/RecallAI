@@ -2,6 +2,7 @@ import uuid
 import time
 import logging
 import re
+import hashlib
 from threading import Lock
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, SessionExpired, TransientError
@@ -115,14 +116,21 @@ def neo_store(
     action: str,
     reason: str,
     source: str,
+    project_id: str,
+    organization_id: str,
     people: list = None,
     impact: str = "",
     alternatives: list = None,
     timestamp: str = "",
-    project_id: str | None = None,
-    organization_id: str = "default",
 ) -> str:
-    decision_id = str(uuid.uuid4())
+    if not project_id or not organization_id:
+        raise ValueError("organization_id and project_id are required")
+    normalized = "|".join([
+        organization_id, project_id, subject.strip().lower(),
+        action.strip().lower(), reason.strip().lower(), impact.strip().lower(),
+        timestamp.strip(), "\x1f".join(sorted(people or [])), "\x1f".join(sorted(alternatives or [])),
+    ])
+    decision_id = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
     max_retries = 3
     retry_delay = 2
     
@@ -132,36 +140,40 @@ def neo_store(
                 session.run(
                     """
                     MERGE (org:Organization {id: $organization_id})
-                    MERGE (project:Project {id: $project_id})
+                    MERGE (project:Project {id: $project_id, organization_id: $organization_id})
                     ON CREATE SET project.name = $project_id,
                                   project.slug = $project_id,
                                   project.organization_id = $organization_id,
                                   project.status = 'ACTIVE'
                     SET project.organization_id = coalesce(project.organization_id, $organization_id)
-                    CREATE (d:Decision {id: $decision_id})
+                    MERGE (d:Decision {id: $decision_id})
                     SET d.action    = $action,
                         d.subject   = $subject,
                         d.impact    = $impact,
-                        d.source    = $source,
+                        d.source    = coalesce(d.source, $source),
+                        d.sources   = CASE WHEN d.sources IS NULL OR NOT $source IN d.sources THEN coalesce(d.sources, []) + $source ELSE d.sources END,
                         d.timestamp = $timestamp,
                         d.project_id = $project_id,
                         d.organization_id = $organization_id
                     MERGE (d)-[:BELONGS_TO]->(project)
                     WITH d, project
                     FOREACH (person IN $people |
-                        MERGE (p:Person {name: person, project_id: $project_id})
+                        MERGE (p:Person {name: person, project_id: $project_id, organization_id: $organization_id})
                         MERGE (d)-[:MADE_BY]->(p)
                     )
                     WITH d
                     FOREACH (alt IN $alternatives |
-                        MERGE (a:Alternative {text: alt, project_id: $project_id})
+                        MERGE (a:Alternative {text: alt, project_id: $project_id, organization_id: $organization_id})
                         MERGE (d)-[:ALTERNATIVE]->(a)
                     )
                     WITH d
                     FOREACH (r IN CASE WHEN $reason <> '' THEN [$reason] ELSE [] END |
-                        MERGE (rn:Reason {text: r, project_id: $project_id})
+                        MERGE (rn:Reason {text: r, project_id: $project_id, organization_id: $organization_id})
                         MERGE (d)-[:BASED_ON]->(rn)
                     )
+                    WITH d
+                    MERGE (doc:Document {source: $source, project_id: $project_id, organization_id: $organization_id})
+                    MERGE (doc)-[:SUPPORTS]->(d)
                     """,
                     action=action, decision_id=decision_id,
                     subject=subject, impact=impact,
@@ -169,7 +181,7 @@ def neo_store(
                     people=people or [],
                     alternatives=alternatives or [],
                     reason=reason or "",
-                    project_id=project_id or "main-workspace",
+                    project_id=project_id,
                     organization_id=organization_id,
                 )
             logger.info(f"[NEO4J] Stored decision: {decision_id}")
@@ -184,26 +196,30 @@ def neo_store(
                 raise
 
 
-def neo_store_meeting_knowledge(meeting_id: str, source: str, item: dict, project_id: str | None, organization_id: str = "default") -> str:
+def neo_store_meeting_knowledge(meeting_id: str, source: str, item: dict, project_id: str, organization_id: str) -> str:
     """Persist rich meeting entities while retaining the existing Decision model."""
-    knowledge_id = str(uuid.uuid4())
+    if not project_id or not organization_id:
+        raise ValueError("organization_id and project_id are required")
+    key = "|".join([organization_id, project_id, meeting_id, item.get("category", "other"), item.get("title", ""), item.get("details", "")])
+    knowledge_id = hashlib.sha256(key.encode("utf-8")).hexdigest()
     with _driver.session() as session:
         session.run(
             """
-            MERGE (p:Project {id: $project_id})
+            MERGE (p:Project {id: $project_id, organization_id: $organization_id})
             MERGE (m:Meeting {id: $meeting_id, project_id: $project_id})
             SET m.source = $source, m.organization_id = $organization_id
-            CREATE (k:MeetingKnowledge {id: $knowledge_id, category: $category, title: $title,
-                details: $details, deadline: $deadline, technology: $technology, source: $source,
-                project_id: $project_id, organization_id: $organization_id})
+            MERGE (k:MeetingKnowledge {id: $knowledge_id})
+            SET k.category = $category, k.title = $title, k.details = $details,
+                k.deadline = $deadline, k.technology = $technology, k.source = $source,
+                k.project_id = $project_id, k.organization_id = $organization_id
             MERGE (m)-[:HAS_KNOWLEDGE]->(k)
             MERGE (m)-[:BELONGS_TO]->(p)
             FOREACH (person IN $people |
-                MERGE (person_node:Person {name: person, project_id: $project_id})
+                MERGE (person_node:Person {name: person, project_id: $project_id, organization_id: $organization_id})
                 MERGE (k)-[:INVOLVES]->(person_node))
             RETURN k.id as id
             """,
-            project_id=project_id or "main-workspace", meeting_id=meeting_id, source=source,
+            project_id=project_id, meeting_id=meeting_id, source=source,
             knowledge_id=knowledge_id, category=item.get("category", "other"), title=item.get("title", ""),
             details=item.get("details", ""), deadline=item.get("deadline"), technology=item.get("technology"),
             people=item.get("people") or [], organization_id=organization_id,
@@ -211,7 +227,8 @@ def neo_store_meeting_knowledge(meeting_id: str, source: str, item: dict, projec
     return knowledge_id
 
 
-def _search_decision_fulltext(session, fulltext_query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None) -> list:
+def _search_decision_fulltext(session, fulltext_query: str, limit: int, source_filter: str | None, project_id: str, organization_id: str, metadata_filters: dict | None = None) -> list:
+    filters = metadata_filters or {}
     return session.run(
         """
         CALL () {
@@ -230,9 +247,13 @@ def _search_decision_fulltext(session, fulltext_query: str, limit: int, source_f
             RETURN d, score
         }
         WITH d, max(score) AS score
-        WHERE ($project_id IS NULL OR d.project_id = $project_id)
-          AND ($organization_id IS NULL OR d.organization_id = $organization_id)
+        WHERE d.project_id = $project_id
+          AND d.organization_id = $organization_id
           AND ($source_filter IS NULL OR d.source = $source_filter)
+          AND ($document_id IS NULL OR d.id = $document_id OR d.source = $document_id)
+          AND ($chunk_id IS NULL OR d.chunk_id = $chunk_id)
+          AND ($section IS NULL OR d.section = $section)
+          AND ($page IS NULL OR d.page = $page)
         OPTIONAL MATCH (d)-[:BASED_ON]->(r:Reason)
         OPTIONAL MATCH (d)-[:MADE_BY]->(p:Person)
         OPTIONAL MATCH (d)-[:ALTERNATIVE]->(a:Alternative)
@@ -252,17 +273,26 @@ def _search_decision_fulltext(session, fulltext_query: str, limit: int, source_f
         source_filter=source_filter,
         project_id=project_id,
         organization_id=organization_id,
+        document_id=filters.get("document_id") or filters.get("id"),
+        chunk_id=filters.get("chunk_id"),
+        section=filters.get("section"),
+        page=filters.get("page"),
     ).data()
 
 
-def _search_meeting_fulltext(session, fulltext_query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None) -> list:
+def _search_meeting_fulltext(session, fulltext_query: str, limit: int, source_filter: str | None, project_id: str, organization_id: str, metadata_filters: dict | None = None) -> list:
+    filters = metadata_filters or {}
     return session.run(
         """
         CALL db.index.fulltext.queryNodes('meeting_knowledge_search', $fulltext_query, {limit: $candidate_limit})
         YIELD node AS k, score
-        WHERE ($project_id IS NULL OR k.project_id = $project_id)
-          AND ($organization_id IS NULL OR k.organization_id = $organization_id)
+        WHERE k.project_id = $project_id
+          AND k.organization_id = $organization_id
           AND ($source_filter IS NULL OR k.source = $source_filter)
+          AND ($document_id IS NULL OR k.id = $document_id OR k.source = $document_id)
+          AND ($chunk_id IS NULL OR k.chunk_id = $chunk_id)
+          AND ($section IS NULL OR k.section = $section)
+          AND ($page IS NULL OR k.page = $page)
         OPTIONAL MATCH (k)-[:INVOLVES]->(p:Person)
         RETURN k.id as id, k.title as decision, k.category as topic,
                k.details as impact, k.source as source, '' as timestamp,
@@ -277,23 +307,31 @@ def _search_meeting_fulltext(session, fulltext_query: str, limit: int, source_fi
         source_filter=source_filter,
         project_id=project_id,
         organization_id=organization_id,
+        document_id=filters.get("document_id") or filters.get("id"),
+        chunk_id=filters.get("chunk_id"),
+        section=filters.get("section"),
+        page=filters.get("page"),
     ).data()
 
 
-def _fulltext_search(query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None) -> list:
+def _fulltext_search(query: str, limit: int, source_filter: str | None, project_id: str | None, organization_id: str | None, metadata_filters: dict | None = None) -> list:
+    # Require tenant scope to avoid returning cross-project data.
+    if not project_id or not organization_id:
+        logger.warning("[NEO] _fulltext_search called without project_id or organization_id — returning empty")
+        return []
     lucene_query = _fulltext_query(query)
     if not lucene_query:
         return []
     with _driver.session() as session:
-        decisions = _search_decision_fulltext(session, lucene_query, limit, source_filter, project_id, organization_id)
-        knowledge = _search_meeting_fulltext(session, lucene_query, limit, source_filter, project_id, organization_id)
+        decisions = _search_decision_fulltext(session, lucene_query, limit, source_filter, project_id, organization_id, metadata_filters)
+        knowledge = _search_meeting_fulltext(session, lucene_query, limit, source_filter, project_id, organization_id, metadata_filters)
     return decisions + knowledge
 
 
-def neo_impact_search(topic: str, limit: int = 10, source_filter: str | None = None, project_id: str | None = None, organization_id: str | None = None) -> list:
+def neo_impact_search(topic: str, organization_id: str | None = None, project_id: str | None = None, limit: int = 10, source_filter: str | None = None) -> list:
     """Find impact candidates via Neo4j full-text indexes, never a graph scan."""
     return _fulltext_search(topic, limit, source_filter, project_id, organization_id)
 
 
-def neo_search(query: str, limit: int = 5, source_filter: str | None = None, project_id: str | None = None, organization_id: str | None = None) -> list:
-    return _fulltext_search(query, limit, source_filter, project_id, organization_id)
+def neo_search(query: str, organization_id: str | None = None, project_id: str | None = None, limit: int = 5, source_filter: str | None = None, metadata_filters: dict | None = None) -> list:
+    return _fulltext_search(query, limit, source_filter, project_id, organization_id, metadata_filters)

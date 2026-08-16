@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     groq_vision_model: str = "qwen/qwen3.6-27b"
     supabase_url: str = ""
     supabase_publishable_key: str = ""
+    supabase_service_role_key: str = ""
     # Backwards-compatible name for projects that still expose the legacy anon key.
     supabase_anon_key: str = ""
     supabase_jwt_audience: str = "authenticated"
@@ -37,6 +38,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     max_upload_size_bytes: int = 25 * 1024 * 1024
     log_level: str = "INFO"
+    groq_cost_per_1k_tokens: float = 0.0
+    cohere_cost_per_1k_tokens: float = 0.0
+    groq_transcription_cost_per_minute: float = 0.0
+    query_cache_ttl_seconds: int = 60
+    query_cache_max_entries: int = 1000
+    observability_alert_error_rate: float = 0.25
 
     class Config:
         env_file = Path(__file__).resolve().parent.parent / ".env"

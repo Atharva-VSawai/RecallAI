@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -36,7 +37,7 @@ export default function SignupPage() {
     }
 
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
         options: {
@@ -112,9 +113,11 @@ export default function SignupPage() {
                 transition={{ type: "spring", stiffness: 300, damping: 20 }}
                 className="relative"
               >
-                <img
+                <Image
                   src="/logo2.png"
                   alt="Recall.AI"
+                  width={180}
+                  height={52}
                   className="h-16 w-auto object-contain relative z-10 drop-shadow-[0_0_24px_rgba(139,92,246,0.45)]"
                 />
                 <div className="absolute inset-0 bg-gradient-to-r from-accent-2/30 via-accent-3/30 to-accent/30 blur-2xl rounded-full" />

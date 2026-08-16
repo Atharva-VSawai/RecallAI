@@ -5,7 +5,7 @@ import { CalendarDays, CheckCircle2, CircleOff, CloudOff, Loader2, RefreshCw, Sh
 import { Button } from "@/components/ui/button";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/state";
 import { useAuth } from "@/contexts/AuthContext";
-import { connectTeams, disconnectTeams, getTeamsMeeting, getTeamsStatus, listTeamsMeetings, syncTeams, type TeamsMeeting, type TeamsStatus } from "@/lib/api";
+import { connectTeams, disconnectTeams, getTeamsMeeting, getTeamsStatus, listTeamsMeetings, syncTeams, type TeamsMeeting, type TeamsStatus, pollJob } from "@/lib/api";
 
 type MeetingDetails = TeamsMeeting & { knowledge: Record<string, unknown>[]; participants: string[] };
 function displayDate(value?: string | number | null) { if (!value) return "Not available"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "Not available" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: typeof value === "string" ? "short" : undefined }).format(date); }
@@ -19,7 +19,7 @@ export default function TeamsPage() {
   const [hasError, setHasError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [transcriptAccess, setTranscriptAccess] = useState<"available" | "requires_admin_consent" | null>(null);
+  const [transcriptAccess] = useState<"available" | "requires_admin_consent" | null>(null);
   const activeProjectId = activeProject?.id;
 
   const load = useCallback(async () => {
@@ -35,7 +35,7 @@ export default function TeamsPage() {
   useEffect(() => { const timer = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(timer); }, [load]);
   const handleConnect = async () => { setNotice(null); try { await connectTeams(); } catch { setNotice("We couldn’t start the Microsoft Teams connection."); } };
   const handleDisconnect = async () => { setBusy(true); setNotice(null); try { await disconnectTeams(); setSelected(null); setNotice("Microsoft Teams has been disconnected."); await load(); } catch { setNotice("We couldn’t disconnect Microsoft Teams."); } finally { setBusy(false); } };
-  const runSync = async () => { setBusy(true); setNotice(null); try { const result = await syncTeams(); const total = result.count + result.mocked_count; setTranscriptAccess(result.transcript_access === "requires_admin_consent" ? "requires_admin_consent" : result.transcript_access === "available" ? "available" : null); setNotice(`${total} meeting transcript${total === 1 ? " was" : "s were"} processed.`); await load(); } catch { setNotice("We couldn’t sync Teams data. Please try again."); } finally { setBusy(false); } };
+  const runSync = async () => { setBusy(true); setNotice(null); try { const result = await syncTeams(); if (result.job_id) { await pollJob(result.job_id); } setNotice("Meetings sync completed successfully."); await load(); } catch { setNotice("We couldn’t sync Teams data. Please try again."); } finally { setBusy(false); } };
   const openMeeting = async (meeting: TeamsMeeting) => { setBusy(true); setNotice(null); try { setSelected(await getTeamsMeeting(meeting.id)); } catch { setNotice("We couldn’t load this meeting’s extracted knowledge."); } finally { setBusy(false); } };
   const canManage = can("project:manage");
 

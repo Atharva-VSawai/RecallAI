@@ -1,6 +1,6 @@
 import sys
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, ".")
 
@@ -66,6 +66,24 @@ def test_graph_validation_handshake_returns_plain_text():
     assert response.headers["content-type"].startswith("text/plain")
 
 
+def test_teams_notifications_require_explicit_client_state(monkeypatch):
+    monkeypatch.setattr(settings, "teams_webhook_client_state", "")
+    response = TestClient(app).post("/integrations/teams/notifications", json={"value": [{"subscriptionId": "untrusted"}]})
+    assert response.status_code == 400
+
+
+def test_teams_notifications_ignore_wrong_client_state(monkeypatch):
+    monkeypatch.setattr(settings, "teams_webhook_client_state", "expected-state")
+    with patch.object(TeamsService, "sync_subscription") as sync:
+        response = TestClient(app).post(
+            "/integrations/teams/notifications",
+            json={"value": [{"subscriptionId": "subscription-1", "clientState": "wrong-state"}]},
+        )
+    assert response.status_code == 200
+    assert response.json()["received"] == 1
+    sync.assert_not_called()
+
+
 def test_transcript_permission_falls_back_to_graph_shaped_mock(monkeypatch):
     monkeypatch.setattr(settings, "mock_teams_transcripts", True)
     adapter = MicrosoftTeamsAdapter()
@@ -93,7 +111,7 @@ def test_mock_transcript_runs_through_shared_ingestion_stages(monkeypatch):
     assert stored[0]["project_id"] == "project-1"
 
 
-def test_sync_returns_clear_admin_consent_message_on_transcript_403(monkeypatch):
+def test_sync_starts_background_job_and_returns_job_id(monkeypatch):
     class FakeResult:
         def single(self):
             return None
@@ -106,17 +124,19 @@ def test_sync_returns_clear_admin_consent_message_on_transcript_403(monkeypatch)
     class FakeDriver:
         def session(self): return FakeSession()
 
+    from fastapi import BackgroundTasks
+    bg = BackgroundTasks()
+
     project = ProjectContext("project-1", "org-1", "Project", "project", "OWNER", ("knowledge:write",))
     user = AuthenticatedUser("user-1", "org-1", "OWNER", "user@example.com")
     service = TeamsService()
     monkeypatch.setattr("application.services.teams_service._driver", FakeDriver())
-    monkeypatch.setattr(service, "_access_token", lambda _project_id: "access-token")
-    monkeypatch.setattr(service.adapter, "list_documents", lambda _token: [KnowledgeDocument("meeting-1", "Meeting", "", "teams:meeting-1", {})])
-    monkeypatch.setattr(service.adapter, "fetch_document", lambda *_args: (_ for _ in ()).throw(TeamsGraphError("forbidden", 403)))
-    result = service.sync(project, user)
-    assert result["status"] == "partial"
-    assert result["transcript_access"] == "requires_admin_consent"
-    assert result["message"] == "Transcript access requires Microsoft Entra administrator consent."
+    monkeypatch.setattr(service, "_access_token", lambda _project_id, _organization_id: "access-token")
+    monkeypatch.setattr("application.services.job_service.JobService.create_job", lambda self, **_kwargs: SimpleNamespace(job_id="job-1"))
+    monkeypatch.setattr("ingestion.teams.TeamsSyncRunner", MagicMock())
+    result = service.sync(project, user, background_tasks=bg)
+    assert result["status"] == "success"
+    assert "job_id" in result
 
 
 def test_frontend_url_falls_back_to_cors_origin(monkeypatch):

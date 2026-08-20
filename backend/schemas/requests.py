@@ -37,6 +37,11 @@ class UpdateProjectRequest(CreateProjectRequest):
     pass
 
 
+class MemberRoleRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=200)
+    role: str = Field(pattern=r"^(ADMIN|MANAGER|CONTRIBUTOR|VIEWER)$")
+
+
 class BudgetRequest(BaseModel):
     cost: float = Field(ge=0)
     user_id: str | None = Field(default=None, max_length=200)

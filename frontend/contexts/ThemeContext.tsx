@@ -17,10 +17,11 @@ const STORAGE_KEY = "recallai-theme";
 
 function applyTheme(next: Theme) {
   document.documentElement.classList.toggle("light", next === "light");
+  document.documentElement.classList.toggle("dark", next === "dark");
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => typeof window === "undefined" ? "dark" : (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "dark");
+  const [theme, setThemeState] = useState<Theme>(() => typeof window === "undefined" ? "light" : (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "light");
 
   const setTheme = (next: Theme) => {
     setThemeState(next);
@@ -59,9 +60,9 @@ export function useTheme() {
 export const themeInitScript = `
   (function() {
     try {
-      const theme = localStorage.getItem("${STORAGE_KEY}") || "dark";
-      if (theme === "light") document.documentElement.classList.add("light");
-      else document.documentElement.classList.remove("light");
+      const theme = localStorage.getItem("${STORAGE_KEY}") || "light";
+      document.documentElement.classList.toggle("light", theme === "light");
+      document.documentElement.classList.toggle("dark", theme === "dark");
     } catch (e) {}
   })();
 `;

@@ -36,10 +36,11 @@ def _authorize_job(job_id: str, user: AuthenticatedUser, project_id: str | None 
 def _dispatch_job(job, background_tasks: BackgroundTasks):
     service = JobService()
     if job.source_type in {"PDF", "DOCS", "EXCEL", "IMAGE", "AUDIO", "VIDEO"}:
-        if not job.input_payload_b64:
+        if not job.input_payload_b64 and not job.input_uri:
             raise ValidationError("This job has no durable input and cannot be retried")
         from ingestion.job_runner import IngestionJobRunner
-        background_tasks.add_task(IngestionJobRunner(job.job_id, service, job.organization_id).process_file_bytes, file_bytes=base64.b64decode(job.input_payload_b64), filename=job.source_config.get("filename", job.source_id), provider=job.source_config.get("provider", "groq"))
+        file_bytes = base64.b64decode(job.input_payload_b64) if job.input_payload_b64 else None
+        background_tasks.add_task(IngestionJobRunner(job.job_id, service, job.organization_id).process_file_bytes, file_bytes=file_bytes, filename=job.source_config.get("filename", job.source_id), provider=job.source_config.get("provider", "groq"))
     elif job.source_type == "slack":
         from ingestion.slack import SlackIngestionRunner
         background_tasks.add_task(SlackIngestionRunner(job.job_id, service, job.organization_id).process_slack_channel, channel_id=job.source_config["channel_id"], limit=int(job.source_config.get("limit", 100)), provider=job.source_config.get("provider", "groq"))

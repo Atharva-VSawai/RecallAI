@@ -92,6 +92,23 @@ export interface SourceTrace {
   tool: string;
   args: Record<string, string>;
   result_preview: string;
+  evidence_id?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface EvidenceItem {
+  evidence_id: string;
+  document_id: string;
+  source_type: string;
+  content: string;
+  relevance_score?: number | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface GroundedClaim {
+  text: string;
+  evidence_ids: string[];
 }
 
 export interface QueryResponse {
@@ -101,6 +118,10 @@ export interface QueryResponse {
   reasoning: string;
   source_trace: SourceTrace[];
   timestamp: string;
+  status?: "answerable" | "insufficient_evidence" | "conflicting_evidence";
+  claims?: GroundedClaim[];
+  evidence?: EvidenceItem[];
+  conflicts?: Array<{ type: string; values: Array<{ value: string; evidence_ids: string[] }> }>;
 }
 
 export interface IngestSlackResponse {
@@ -171,6 +192,27 @@ export async function deleteProject(projectId: string): Promise<void> {
     method: "DELETE",
   });
   if (!res.ok) throw await readApiError(res, "Failed to delete project");
+}
+
+export interface ProjectMember {
+  user_id: string;
+  email?: string;
+  role: "OWNER" | "ADMIN" | "MANAGER" | "CONTRIBUTOR" | "VIEWER";
+  created_at?: string;
+}
+
+export async function listProjectMembers(projectId: string): Promise<ProjectMember[]> {
+  const res = await authenticatedFetch(`${BASE}/projects/${encodeURIComponent(projectId)}/members`, { cache: "no-store", headers: { "X-Project-ID": projectId } });
+  if (!res.ok) throw await readApiError(res, "Failed to load project members");
+  const data = await res.json();
+  return data.members ?? [];
+}
+
+export async function updateProjectMember(projectId: string, userId: string, role: ProjectMember["role"]): Promise<ProjectMember> {
+  const res = await authenticatedFetch(`${BASE}/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Project-ID": projectId }, body: JSON.stringify({ user_id: userId, role }) });
+  if (!res.ok) throw await readApiError(res, "Failed to update project member");
+  const data = await res.json();
+  return data.member;
 }
 
 export function uniqueProjects(projects: Project[]): Project[] {
@@ -489,6 +531,8 @@ export interface JobStatusResponse {
   progress: number;
   error_message?: string;
   result?: string;
+  current_stage?: string;
+  retry_count?: number;
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
@@ -497,7 +541,15 @@ export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   return res.json();
 }
 
-export async function pollJob(jobId: string, onProgress?: (progress: number) => void): Promise<string> {
+export async function retryJob(jobId: string): Promise<JobStatusResponse> {
+  const res = await authenticatedFetch(`${BASE}/ingest/${encodeURIComponent(jobId)}/retry`, { method: "POST" });
+  if (!res.ok) throw await readApiError(res, "Failed to retry ingestion job");
+  return res.json();
+}
+
+export async function pollJob(jobId: string, onProgress?: (progress: number) => void, options: { autoRetryStale?: boolean; maxStaleRetries?: number } = {}): Promise<string> {
+  let staleRetries = 0;
+  const maxStaleRetries = options.maxStaleRetries ?? 1;
   while (true) {
     const status = await getJobStatus(jobId);
     if (status.status === "COMPLETED") {
@@ -510,7 +562,12 @@ export async function pollJob(jobId: string, onProgress?: (progress: number) => 
       throw new Error("Job was cancelled");
     }
     if (status.status === "STALE") {
-      throw new Error("Job became stale and must be retried");
+      if (options.autoRetryStale !== false && staleRetries < maxStaleRetries) {
+        staleRetries += 1;
+        await retryJob(jobId);
+        continue;
+      }
+      throw new Error("Job became stale and could not be retried automatically");
     }
     if (status.status === "PROCESSING" && status.progress != null && onProgress) {
       onProgress(status.progress);

@@ -111,9 +111,7 @@ class IngestionService:
                 filename=filename,
                 provider=provider,
                 store_graph=True,
-                store_vector=True,
-                project_id=project.project_id,
-                organization_id=project.organization_id
+                store_vector=True
             )
             
             from activity_store import activity_store

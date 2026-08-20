@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import {
   queryKnowledge, ingestFile, ingestSlack, ingestAudio,
-  ingestExcel, ingestImage, type QueryResponse, pollJob
+  ingestExcel, ingestImage, type QueryResponse, type EvidenceItem, pollJob
 } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import SourceCard from "@/components/SourceCard";
@@ -21,6 +21,21 @@ import { validateFile, validateQuery, validateSlackChannel } from "@/lib/validat
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function evidenceLocation(evidence: EvidenceItem) {
+  const metadata = evidence.metadata ?? {};
+  return [
+    metadata.source ?? evidence.document_id,
+    metadata.section && `Section ${metadata.section}`,
+    metadata.page && `Page ${metadata.page}`,
+    metadata.sheet && `Sheet ${metadata.sheet}`,
+    metadata.timestamp && String(metadata.timestamp),
+  ].filter(Boolean).join(" · ");
+}
+
+function jumpToEvidence(evidenceId: string) {
+  document.getElementById(`evidence-${evidenceId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -807,6 +822,35 @@ export default function QueryPage() {
                     >
                       {result.answer}
                     </motion.div>
+                    {result.status === "insufficient_evidence" && (
+                      <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-foreground-muted">
+                        <p className="font-semibold text-warning">Insufficient evidence</p>
+                        <p className="mt-1 leading-6">The indexed sources did not contain enough relevant support for a grounded answer. Try naming a document, section, date, or identifier.</p>
+                      </div>
+                    )}
+                    {result.status === "conflicting_evidence" && (
+                      <div className="rounded-xl border border-danger/30 bg-danger/10 p-4 text-sm text-foreground-muted">
+                        <p className="font-semibold text-danger">Conflicting evidence</p>
+                        <p className="mt-1 leading-6">The available sources disagree. Review the evidence groups below before relying on this answer.</p>
+                        {result.conflicts?.map((conflict) => <div key={conflict.type} className="mt-3 space-y-1 text-xs">{conflict.values.map((value) => <p key={value.value}><span className="font-medium text-foreground">{value.value}</span> · {value.evidence_ids.length} source{value.evidence_ids.length === 1 ? "" : "s"}</p>)}</div>)}
+                      </div>
+                    )}
+                    {result.claims?.length ? (
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-foreground-dim">
+                        <span>Claims:</span>
+                        {result.claims.flatMap((claim) => claim.evidence_ids).filter((id, index, ids) => ids.indexOf(id) === index).map((id) => <button key={id} onClick={() => jumpToEvidence(id)} className="rounded-md border border-accent/30 bg-accent/10 px-2 py-1 font-medium text-accent hover:bg-accent/20">[{id.slice(-6)}]</button>)}
+                      </div>
+                    ) : null}
+                    {result.evidence?.length ? (
+                      <section aria-label="Evidence" className="space-y-2">
+                        <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground-dim">Evidence and locations</h2>
+                        {result.evidence.map((evidence) => <article id={`evidence-${evidence.evidence_id}`} key={evidence.evidence_id} className="scroll-mt-24 rounded-xl border border-card-border bg-card/45 p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-foreground">{evidenceLocation(evidence)}</p><button onClick={() => navigator.clipboard?.writeText(evidence.evidence_id)} className="text-[11px] text-accent hover:underline" title="Copy citation identifier">Copy citation</button></div>
+                          <p className="mt-2 text-sm leading-6 text-foreground-muted">{evidence.content}</p>
+                          <p className="mt-2 font-mono text-[10px] text-foreground-dim">{evidence.evidence_id}</p>
+                        </article>)}
+                      </section>
+                    ) : null}
                     {result.source_trace.length > 0 && (
                       <div>
                         <motion.button

@@ -119,6 +119,42 @@ class ProjectService:
             raise AuthorizationError("You do not have permission to perform this project action")
         return context
 
+    def list_members(self, context: ProjectContext) -> list[dict]:
+        with _driver.session() as session:
+            result = session.run(
+                """
+                MATCH (u:User)-[m:MEMBER_OF]->(p:Project {id: $project_id, organization_id: $organization_id})
+                RETURN u.id as user_id, u.email as email, m.role as role, m.created_at as created_at
+                ORDER BY coalesce(m.role, 'VIEWER'), coalesce(u.email, u.id)
+                """, project_id=context.project_id, organization_id=context.organization_id)
+            return [{"user_id": row["user_id"], "email": row["email"], "role": row["role"] or "VIEWER", "created_at": row["created_at"]} for row in result]
+
+    def update_member_role(self, context: ProjectContext, user_id: str, role: str) -> dict:
+        if role not in {"ADMIN", "MANAGER", "CONTRIBUTOR", "VIEWER"}:
+            raise ValidationError("Unsupported project member role")
+        with _driver.session() as session:
+            result = session.run(
+                """
+                MATCH (u:User {id: $user_id})-[m:MEMBER_OF]->(p:Project {id: $project_id, organization_id: $organization_id})
+                WHERE m.role <> 'OWNER'
+                SET m.role = $role
+                RETURN u.id as user_id, u.email as email, m.role as role, m.created_at as created_at
+                """, user_id=user_id, project_id=context.project_id, organization_id=context.organization_id, role=role).single()
+            if not result:
+                raise NotFoundError("Project member not found or owner role cannot be changed")
+            return {"user_id": result["user_id"], "email": result["email"], "role": result["role"], "created_at": result["created_at"]}
+
+    def organization_summary(self, user: AuthenticatedUser) -> dict:
+        with _driver.session() as session:
+            row = session.run(
+                """
+                MATCH (p:Project {organization_id: $organization_id})
+                WITH count(p) as projects
+                OPTIONAL MATCH (u:User {organization_id: $organization_id})
+                RETURN projects, count(u) as users
+                """, organization_id=user.organization_id).single()
+            return {"organization_id": user.organization_id, "projects": row["projects"] if row else 0, "users": row["users"] if row else 0}
+
     def create_project(self, name: str, user: AuthenticatedUser) -> dict:
         name = name.strip()
         if not name:

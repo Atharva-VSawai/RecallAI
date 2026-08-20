@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/state";
 
-function sourceIcon(type: string) {
-  const normalized = type.toLowerCase();
+function sourceIcon(type: string | null | undefined) {
+  const normalized = (type ?? "").toLowerCase();
   if (["pdf"].includes(normalized)) return FileText;
   if (["xls", "xlsx", "csv"].includes(normalized)) return FileSpreadsheet;
   if (["mp3", "wav", "m4a", "mp4", "mov", "avi"].includes(normalized)) return FileAudio;
@@ -19,8 +19,12 @@ function sourceIcon(type: string) {
   return File;
 }
 
-function sourceType(type: string) { return type ? type.toUpperCase() : "FILE"; }
-function displayDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "Date unavailable" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date); }
+function sourceType(type: string | null | undefined) { return type ? type.toUpperCase() : "FILE"; }
+function displayDate(value: string | null | undefined) {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Date unavailable" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
+}
 
 export default function SourcesPage() {
   const { activeProject, can } = useAuth();
@@ -41,7 +45,7 @@ export default function SourcesPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const refresh = () => void load(); window.addEventListener("recallai:files-changed", refresh); return () => window.removeEventListener("recallai:files-changed", refresh); }, [load]);
 
-  const visibleFiles = useMemo(() => files.filter((file) => `${file.filename} ${file.type} ${file.source}`.toLowerCase().includes(search.toLowerCase().trim())), [files, search]);
+  const visibleFiles = useMemo(() => files.filter((file) => `${file.filename ?? ""} ${file.type ?? ""} ${file.source ?? ""}`.toLowerCase().includes(search.toLowerCase().trim())), [files, search]);
   const confirmDelete = async () => {
     if (!deleting) return;
     setBusy(true);

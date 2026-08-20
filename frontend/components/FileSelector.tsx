@@ -116,7 +116,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
   const filteredFiles = files.filter(
     (f) =>
       f.filename.toLowerCase().includes(search.toLowerCase()) ||
-      f.type.toLowerCase().includes(search.toLowerCase())
+      (f.type ?? "").toLowerCase().includes(search.toLowerCase())
   );
 
   const getFileIcon = (type: string) => {
@@ -217,7 +217,8 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
           <div className="overflow-hidden rounded-xl border border-card-border">
             <AnimatePresence>
               {filteredFiles.map((file, i) => {
-              const Icon = getFileIcon(file.type);
+              const safeType = file.type ?? "";
+              const Icon = getFileIcon(safeType);
               const isSelected = selectedSource === file.source;
               
               return (
@@ -237,7 +238,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
                       onClick={() => onSelectFile(file.source, file.filename)}
                       className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
-                      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${getFileColor(file.type)}`}>
+                      <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br ${getFileColor(safeType)}`}>
                         <Icon className="h-4 w-4 text-white" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -250,9 +251,11 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
                           )}
                         </div>
                         <div className="mt-1 flex items-center gap-2 text-[11px] text-foreground-dim">
+                          {safeType && (
                           <span className="rounded border border-card-border px-1.5 py-0.5 font-bold">
-                            {file.type.toUpperCase()}
+                            {safeType.toUpperCase()}
                           </span>
+                          )}
                           {file.uploaded_at && (
                             <span className="flex items-center gap-1">
                               <Calendar className="h-3 w-3" />

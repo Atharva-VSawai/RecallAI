@@ -200,11 +200,24 @@ def retrieve_evidence(
     store.metric("retrieval_started", organization_id=organization_id, project_id=project_id)
     filters = _parse_retrieval_filters(question, source_filter, metadata_filters)
     evidence: list[Evidence] = []
-    for record in neo_retriever(query=question, organization_id=organization_id, project_id=project_id, limit=8, source_filter=filters.source_filter, metadata_filters=filters.metadata):
+    # Hybrid retrieval should be best-effort. A transient outage in Neo4j or
+    # Chroma must not discard evidence from the healthy backend (or turn an
+    # otherwise answerable query into a generic HTTP 502).
+    try:
+        neo_records = neo_retriever(query=question, organization_id=organization_id, project_id=project_id, limit=8, source_filter=filters.source_filter, metadata_filters=filters.metadata)
+    except Exception as exc:
+        logger.warning("Neo4j retrieval failed; continuing with vector retrieval: %s", exc)
+        neo_records = []
+    for record in neo_records:
         item = _from_neo(record, organization_id, project_id)
         if item:
             evidence.append(item)
-    for record in chroma_retriever(query=question, organization_id=organization_id, project_id=project_id, k=12, source_filter=filters.source_filter, metadata_filters=filters.metadata):
+    try:
+        chroma_records = chroma_retriever(query=question, organization_id=organization_id, project_id=project_id, k=12, source_filter=filters.source_filter, metadata_filters=filters.metadata)
+    except Exception as exc:
+        logger.warning("Vector retrieval failed; continuing with full-text retrieval: %s", exc)
+        chroma_records = []
+    for record in chroma_records:
         item = _from_chroma(record, organization_id, project_id)
         if item:
             evidence.append(item)
@@ -284,6 +297,16 @@ def _parse_json(content: Any) -> dict[str, Any]:
     return json.loads(text)
 
 
+def _evidence_fallback(question: str, evidence: list[Evidence]) -> tuple[list[dict[str, Any]], str]:
+    """Return a conservative answer when the synthesis provider is unavailable."""
+    claims = []
+    for item in evidence[:3]:
+        span, _ = _evidence_span(question, item, max_chars=500)
+        if span.strip():
+            claims.append({"text": span.strip(), "evidence_ids": [item.evidence_id]})
+    return claims, " ".join(claim["text"] for claim in claims)
+
+
 def run_grounded_query(question: str, source_filter: str | None, provider: str, project_id: str, organization_id: str) -> dict[str, Any]:
     evidence = retrieve_evidence(question, organization_id, project_id, source_filter)
     relevant = _relevant(question, evidence)
@@ -305,7 +328,15 @@ def run_grounded_query(question: str, source_filter: str | None, provider: str, 
 
     context, compressed = _compressed_context(question, relevant)
     prompt = f"Question: {question}\nEvidence:\n{context}\n\nReturn JSON only: {{\"status\": \"answerable\", \"claims\": [{{\"text\": \"...\", \"evidence_ids\": [\"ev_...\"]}}]}}. Every claim must cite one or more evidence IDs. Do not use knowledge outside the evidence."
-    response = get_llm(provider, temperature=0, is_json=True).invoke([SystemMessage(content="Answer only from the supplied evidence. Produce grounded structured claims."), HumanMessage(content=prompt)])
+    try:
+        response = get_llm(provider, temperature=0, is_json=True).invoke([SystemMessage(content="Answer only from the supplied evidence. Produce grounded structured claims."), HumanMessage(content=prompt)])
+    except Exception as exc:
+        logger.warning("Grounded answer synthesis failed; returning retrieved evidence: %s", exc)
+        claims, answer = _evidence_fallback(question, compressed)
+        base["claims"] = claims
+        base["answer"] = answer or "I found relevant grounded evidence, but could not format a synthesized answer right now."
+        base["reasoning"] += " Answer synthesis was unavailable, so the response contains direct evidence excerpts."
+        return base
     try:
         payload = _parse_json(response.content)
         valid_ids = {item.evidence_id for item in compressed}
@@ -313,8 +344,10 @@ def run_grounded_query(question: str, source_filter: str | None, provider: str, 
     except (ValueError, TypeError, json.JSONDecodeError):
         claims = []
     if not claims:
-        base["status"] = INSUFFICIENT_EVIDENCE
-        base["answer"] = "I don't have enough grounded evidence to answer that question."
+        claims, answer = _evidence_fallback(question, compressed)
+        base["claims"] = claims
+        base["answer"] = answer or "I found relevant grounded evidence, but could not format a synthesized answer right now."
+        base["reasoning"] += " The provider returned an unusable response, so the response contains direct evidence excerpts."
         return base
     base["claims"] = claims
     base["answer"] = " ".join(claim["text"] for claim in claims)

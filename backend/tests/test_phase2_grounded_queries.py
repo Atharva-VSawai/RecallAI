@@ -44,6 +44,34 @@ def test_empty_or_irrelevant_retrieval_abstains_without_llm_call():
     assert result["status"] == INSUFFICIENT_EVIDENCE
     llm.assert_not_called()
 
+
+def test_retrieval_continues_when_one_backend_is_unavailable():
+    result = retrieve_evidence(
+        "Why was PostgreSQL selected?", "org-a", "project-a",
+        neo_retriever=lambda **_: (_ for _ in ()).throw(RuntimeError("Neo4j unavailable")),
+        chroma_retriever=lambda **_: [{"page_content": "PostgreSQL was selected for scalability.", "metadata": {
+            "organization_id": "org-a", "project_id": "project-a", "document_id": "doc-1", "source": "architecture.pdf",
+        }}],
+    )
+    assert len(result) == 1
+
+
+def test_llm_failure_returns_cited_evidence_instead_of_raising():
+    evidence = retrieve_evidence(
+        "Why was PostgreSQL selected?", "org-a", "project-a",
+        neo_retriever=lambda **_: [],
+        chroma_retriever=lambda **_: [{"page_content": "PostgreSQL was selected for scalability.", "metadata": {
+            "organization_id": "org-a", "project_id": "project-a", "document_id": "doc-1", "source": "architecture.pdf",
+        }}],
+    )
+    with patch("application.services.grounded_query_service.retrieve_evidence", return_value=evidence), patch(
+        "application.services.grounded_query_service.get_llm", side_effect=RuntimeError("provider unavailable")
+    ):
+        result = run_grounded_query("Why was PostgreSQL selected?", None, "groq", "project-a", "org-a")
+    assert result["status"] == ANSWERABLE
+    assert result["claims"][0]["evidence_ids"] == [evidence[0].evidence_id]
+    assert "PostgreSQL was selected" in result["answer"]
+
     irrelevant = SimpleNamespace(evidence_id="ev_x", organization_id="org-a", project_id="project-a", document_id="doc", source_type="document", content="The team discussed lunch.", relevance_score=None, metadata={"source": "notes.txt"}, to_dict=lambda: {"evidence_id": "ev_x"})
     with patch("application.services.grounded_query_service.retrieve_evidence", return_value=[irrelevant]), patch("application.services.grounded_query_service.get_llm") as llm:
         result = run_grounded_query("What database does the project use?", None, "groq", "project-a", "org-a")

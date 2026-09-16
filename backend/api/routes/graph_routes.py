@@ -45,7 +45,13 @@ def graph_data(
                 WITH collect(DISTINCT a) AS alternatives
                 RETURN alternatives[0..$relation_limit] AS alternatives
             }
-            RETURN d,people,reasons,alternatives
+            OPTIONAL MATCH (f:File {
+                source: d.source,
+                project_id: $project_id,
+                organization_id: $organization_id
+            })
+            WHERE f.deleted_at IS NULL
+            RETURN d,people,reasons,alternatives,coalesce(f.filename, d.source) AS source_filename
             """,
             project_id=project.project_id,
             organization_id=project.organization_id,
@@ -62,12 +68,13 @@ def graph_data(
         if not decision or not decision.get("id"):
             continue
         source, decision_id = decision.get("source", "unknown"), decision["id"]
-        nodes.setdefault(decision_id, {"id": decision_id, "label": (decision.get("action") or "")[:60], "type": "Decision", "source": source, "subject": decision.get("subject", ""), "impact": decision.get("impact", "")})
+        source_label = record.get("source_filename") or source
+        nodes.setdefault(decision_id, {"id": decision_id, "label": (decision.get("action") or "")[:60], "type": "Decision", "source": source, "source_label": source_label, "subject": decision.get("subject", ""), "impact": decision.get("impact", "")})
         for key, name, node_type, relation in (("people", "name", "Person", "MADE_BY"), ("reasons", "text", "Reason", "BASED_ON"), ("alternatives", "text", "Alternative", "ALTERNATIVE")):
             for node in record[key] or []:
                 if node and node.get(name):
                     node_id = f"{node[name]}@{source}"
-                    nodes.setdefault(node_id, {"id": node_id, "label": str(node[name])[:60], "type": node_type, "source": source})
+                    nodes.setdefault(node_id, {"id": node_id, "label": str(node[name])[:60], "type": node_type, "source": source, "source_label": source_label})
                     edges.add((decision_id, node_id, relation))
     returned_decisions = sum(1 for node in nodes.values() if node["type"] == "Decision")
     return {

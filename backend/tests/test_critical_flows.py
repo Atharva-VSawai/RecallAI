@@ -104,7 +104,7 @@ def test_graph_endpoint_bounds_decisions_and_returns_partial_metadata(monkeypatc
             calls.append((statement, params))
             if "count(d)" in statement:
                 return Result(single={"total_decisions": 750})
-            return Result(data=[{"d": {"id": "d-1", "action": "Migrate", "source": "doc"}, "people": [], "reasons": [], "alternatives": []}])
+            return Result(data=[{"d": {"id": "d-1", "action": "Migrate", "source": "document:" + "a" * 64}, "people": [], "reasons": [], "alternatives": [], "source_filename": "architecture.pdf"}])
 
     from api.routes.graph_routes import graph_data
     monkeypatch.setattr("api.routes.graph_routes.execute_with_retry", lambda operation, **_: operation(Session()))
@@ -117,6 +117,8 @@ def test_graph_endpoint_bounds_decisions_and_returns_partial_metadata(monkeypatc
     assert graph_params["organization_id"] == "org-a"
     assert graph_params["limit"] == 100
     assert graph_params["relation_limit"] == 2
+    assert response["nodes"][0]["source"] == "document:" + "a" * 64
+    assert response["nodes"][0]["source_label"] == "architecture.pdf"
 
 
 def test_rate_limits_are_scoped_to_user_and_project():

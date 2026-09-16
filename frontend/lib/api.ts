@@ -393,6 +393,7 @@ export interface GraphNode {
   label: string;
   type: "Decision" | "Person" | "Reason" | "Alternative";
   source?: string;
+  source_label?: string;
   subject?: string;
   impact?: string;
   color: string;

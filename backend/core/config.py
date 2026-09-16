@@ -3,6 +3,12 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     groq_api_key: str = ""
+    # Groq retired llama-3.3-70b-versatile for free/developer accounts.
+    # Keep this configurable so the model can be changed without a code deploy.
+    # The 20B model is substantially faster for document extraction while
+    # still supporting structured output. Set GROQ_MODEL to the 120B model
+    # when maximum answer quality matters more than ingestion speed.
+    groq_model: str = "openai/gpt-oss-20b"
     neo4j_uri: str = ""
     neo4j_username: str = ""
     neo4j_password: str = ""
@@ -27,7 +33,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     # llama3.1 is text-only. Image OCR requires a separate vision model.
     ollama_vision_model: str = "llama3.2-vision"
-    groq_vision_model: str = "qwen/qwen3.6-27b"
+    # Qwen 3.6 is a preview model and may not be enabled for every Groq
+    # account. Qwen 3.8 is the current default; image.py also discovers an
+    # available vision model when an explicitly configured model is rejected.
+    groq_vision_model: str = "qwen/qwen3.8-27b"
     supabase_url: str = ""
     supabase_publishable_key: str = ""
     supabase_service_role_key: str = ""

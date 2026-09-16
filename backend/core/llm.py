@@ -80,9 +80,11 @@ def get_llm(provider: str = "groq", temperature: float = 0, is_json: bool = Fals
             provider = "groq" # Fallthrough to Groq
             
     if provider == "groq":
-        logger.info("[LLM] Instantiating Cloud ChatGroq (model: llama-3.3-70b-versatile)")
+        if not settings.groq_api_key.strip():
+            raise RuntimeError("GROQ_API_KEY is not configured")
+        logger.info("[LLM] Instantiating Cloud ChatGroq (model: %s)", settings.groq_model)
         return ObservedLLM(ChatGroq(
             api_key=settings.groq_api_key,
-            model_name="llama-3.3-70b-versatile",
+            model_name=settings.groq_model,
             temperature=temperature
         ), "groq")

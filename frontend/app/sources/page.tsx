@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/state";
+import { displayDate } from "@/lib/format";
 
 function sourceIcon(type: string | null | undefined) {
   const normalized = (type ?? "").toLowerCase();
@@ -20,12 +21,6 @@ function sourceIcon(type: string | null | undefined) {
 }
 
 function sourceType(type: string | null | undefined) { return type ? type.toUpperCase() : "FILE"; }
-function displayDate(value: string | null | undefined) {
-  if (!value) return "Date unavailable";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "Date unavailable" : new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
-}
-
 export default function SourcesPage() {
   const { activeProject, can } = useAuth();
   const [files, setFiles] = useState<FileMetadata[]>([]);

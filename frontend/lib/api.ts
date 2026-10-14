@@ -146,7 +146,7 @@ export interface FileMetadata {
   hash: string;
   type: string;
   source: string;
-  uploaded_at: string;
+  uploaded_at: string | number;
   project_id?: string;
 }
 

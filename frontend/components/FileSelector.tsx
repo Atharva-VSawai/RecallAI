@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { FileText, Search, Calendar, CheckCircle2, Loader2, FileSpreadsheet, Music, Film, Image as ImageIcon, MessageSquare, File, RefreshCw, Trash2, type LucideIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { listFiles, deleteFile, FileMetadata } from "@/lib/api";
+import { displayDate } from "@/lib/format";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   Dialog,
@@ -259,11 +260,7 @@ export default function FileSelector({ onSelectFile, selectedSource }: FileSelec
                           {file.uploaded_at && (
                             <span className="flex items-center gap-1">
                               <Calendar className="h-3 w-3" />
-                              {new Date(file.uploaded_at).toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                year: 'numeric'
-                              })}
+                              {displayDate(file.uploaded_at)}
                             </span>
                           )}
                         </div>

@@ -7,14 +7,7 @@ import { getActivityFeed, getGraphData, listFiles, type ActivityEvent, type File
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/state";
-
-function timeAgo(iso: string) {
-  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 1_440) return `${Math.floor(minutes / 60)}h ago`;
-  return `${Math.floor(minutes / 1_440)}d ago`;
-}
+import { timeAgo } from "@/lib/format";
 
 function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return <section className="panel overflow-hidden"><div className="panel-header"><h2 className="panel-title">{title}</h2>{action}</div>{children}</section>;

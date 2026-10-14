@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 import base64
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import fitz
@@ -318,5 +319,7 @@ class IngestionJobRunner:
                 document_id=self.job.source_config.get("document_id", self.job.source_id),
                 display_source=self.job.source_config.get("display_source", self.job.source_id),
                 organization_id=self.job.organization_id,
-                uploaded_at=int(time.time())
+                # Persist an unambiguous UTC timestamp.  Older records may contain
+                # Unix seconds, so the frontend still accepts both representations.
+                uploaded_at=datetime.now(timezone.utc).isoformat()
             )
